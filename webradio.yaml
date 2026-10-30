@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.7.2"
+    version: "1.7.3"
   on_boot:
     priority: -100
     then:
@@ -125,6 +125,12 @@ globals:
     type: float
     restore_value: true
     initial_value: '0.5'
+
+  # Knob steps not yet applied to the volume, see apply_volume.
+  - id: volume_steps
+    type: int
+    restore_value: false
+    initial_value: '0'
 
   # Station list as "name<TAB>url<TAB>logo-url<NEWLINE>" lines, saved in flash.
   # The logo URL is optional. 6 KB holds about 50 stations.
@@ -1072,9 +1078,26 @@ script:
                       condition:
                         lambda: "return id(ui_page) <= 1;"
                       then:
-                        - media_player.volume_set:
-                            id: media_player_sendspin
-                            volume: !lambda "return clamp(id(media_player_sendspin).volume + 0.05f * dir, 0.0f, 1.0f);"
+                        - lambda: "id(volume_steps) += dir;"
+                        - script.execute: apply_volume
+
+  # Apply collected knob steps at most every 120 ms. One volume change per detent
+  # (15-20 per second when turning fast) caused audible artifacts; the web slider,
+  # which sends at most every 200 ms, did not.
+  - id: apply_volume
+    mode: single
+    then:
+      - while:
+          condition:
+            lambda: "return id(volume_steps) != 0;"
+          then:
+            - media_player.volume_set:
+                id: media_player_sendspin
+                volume: !lambda |-
+                  const float v = clamp(id(media_player_sendspin).volume + 0.05f * id(volume_steps), 0.0f, 1.0f);
+                  id(volume_steps) = 0;
+                  return v;
+            - delay: 120ms
 
   - id: knob_click
     then:
