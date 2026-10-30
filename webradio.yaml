@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.7.6"
+    version: "1.7.7"
   on_boot:
     priority: -100
     then:
@@ -703,30 +703,37 @@ script:
           then:
             - script.execute: render_menu
 
+  # Picking the station that is already playing only returns to the playing screen.
   - id: play_station
     parameters:
       idx: int
     then:
       - if:
           condition:
-            lambda: "return idx >= 0 && idx < (int) id(station_urls).size();"
+            lambda: "return id(radio_active) && id(is_now_playing) && idx == id(station_index);"
           then:
-            - globals.set:
-                id: station_index
-                value: !lambda "return idx;"
-            - globals.set:
-                id: radio_active
-                value: 'true'
-            - media_player.play_media:
-                id: media_player_sendspin
-                media_url: !lambda "return id(station_urls)[idx];"
-            - lambda: "id(current_station).publish_state(id(station_names)[idx]);"
             - script.execute: show_playing
           else:
-            - logger.log:
-                level: WARN
-                format: "No station at index %d"
-                args: [idx]
+            - if:
+                condition:
+                  lambda: "return idx >= 0 && idx < (int) id(station_urls).size();"
+                then:
+                  - globals.set:
+                      id: station_index
+                      value: !lambda "return idx;"
+                  - globals.set:
+                      id: radio_active
+                      value: 'true'
+                  - media_player.play_media:
+                      id: media_player_sendspin
+                      media_url: !lambda "return id(station_urls)[idx];"
+                  - lambda: "id(current_station).publish_state(id(station_names)[idx]);"
+                  - script.execute: show_playing
+                else:
+                  - logger.log:
+                      level: WARN
+                      format: "No station at index %d"
+                      args: [idx]
 
   ######## Navigation ########
 
