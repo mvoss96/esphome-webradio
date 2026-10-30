@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.9.3-airplay"
+    version: "1.9.4-airplay"
   on_boot:
     priority: -100
     then:
@@ -195,12 +195,16 @@ globals:
     restore_value: false
     initial_value: '5'
 
-  # Carousel: menu (0 main, 1 radio, 2 settings), selected tile,
-  # and whether a sound value is being edited.
+  # Carousel: menu (0 main, 1 settings), selected tile, index of the first
+  # station tile in the main menu, and whether a value is being edited.
   - id: menu
     type: int
     restore_value: false
     initial_value: '0'
+  - id: menu_first
+    type: int
+    restore_value: false
+    initial_value: '1'
   - id: menu_sel
     type: int
     restore_value: false
@@ -912,7 +916,7 @@ script:
             lv_obj_remove_flag(id(radio_logo_box), LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(id(cover_box), LV_OBJ_FLAG_HIDDEN);
             esphome::station_logos::show_logo(id(radio_logo_box), id(radio_logo_img), id(radio_logo_lbl),
-                                              id(logos)->big(idx), name);
+                                              id(logos)->get(3, idx, 56, false), name);
           } else if (id(airplay_active)) {
             name = clean(id(airplay_title).state);
             sub = clean(id(airplay_artist).state);
@@ -958,7 +962,19 @@ script:
 
   ######## Carousel ########
 
-  # Open a carousel: m = 0 main menu, 1 radio, 2 settings; s = selected tile.
+  # Open the main menu on what plays: the station, the source tile, or the last station.
+  - id: open_main
+    then:
+      - script.execute:
+          id: open_menu
+          m: 0
+          s: !lambda |-
+            const bool source = id(is_now_playing) && !id(radio_active);
+            if (source) return 1;
+            const int n = (int) id(station_names).size();
+            return 1 + std::max(0, std::min(n - 1, (int) id(station_index)));
+
+  # Open a carousel: m = 0 main menu, 1 settings; s = selected tile.
   - id: open_menu
     parameters:
       m: int
@@ -985,13 +1001,6 @@ script:
     then:
       - lambda: |-
           using namespace esphome::radio_ui;
-          auto back = [] {
-            Item i;
-            i.kind = Item::BACK;
-            i.icon = ICON_BACK;
-            i.label = "Zurück";
-            return i;
-          };
           auto icon = [](const char *ic, const std::string &label, const std::string &sub) {
             Item i;
             i.kind = Item::ICON;
@@ -1016,79 +1025,46 @@ script:
           const int idx = id(station_index);
           const bool playing = id(radio_active) && id(is_now_playing) && idx >= 0 && idx < (int) names.size();
           std::vector<Item> items;
-          const char *title = "";
-          switch (id(menu)) {
-            case 0: {
-              title = "";  // the main menu needs no heading
-              // Main menu tiles show only their name. The first tile leads back to what plays:
-              // the station, Sendspin, or the clock (Zurück).
-              if (playing) {
-                Item i;
-                i.kind = Item::STATION;
-                i.station = idx;
-                i.label = names[idx];
-                i.playing = true;
-                items.push_back(i);
-              } else if (id(airplay_active) && id(is_now_playing)) {
-                Item i = icon(ICON_CAST, "AirPlay", "");
-                i.letter = "A";
-                i.playing = true;
-                items.push_back(i);
-              } else if (!id(radio_active) && id(is_now_playing)) {
-                Item i = icon(ICON_CAST, "Sendspin", "");
-                i.letter = "S";
-                i.playing = true;
-                items.push_back(i);
-              } else {
-                items.push_back(back());
-              }
-              items.push_back(icon(ICON_RADIO, "Radio", ""));
-              items.push_back(icon(ICON_SETTINGS, "Einstellungen", ""));
-              items.push_back(icon(ICON_INFO, "Info", ""));
-              break;
+          if (id(menu) == 0) {
+            // One row: settings, the playing source (AirPlay or Sendspin) if any, then all stations.
+            items.push_back(icon(ICON_SETTINGS, "Einstellungen", ""));
+            if (id(is_now_playing) && !id(radio_active)) {
+              const bool air = id(airplay_active);
+              Item i = icon(ICON_CAST, air ? "AirPlay" : "Sendspin", "");
+              i.letter = air ? "A" : "S";
+              i.playing = true;
+              items.push_back(i);
             }
-            case 1: {
-              title = "Radio";
-              items.push_back(back());
-              for (size_t k = 0; k < names.size(); k++) {
-                Item i;
-                i.kind = Item::STATION;
-                i.station = (int) k;
-                i.label = names[k];
-                i.playing = playing && (int) k == idx;
-                items.push_back(i);
-              }
-              break;
+            id(menu_first) = (int) items.size();
+            for (size_t k = 0; k < names.size(); k++) {
+              Item i;
+              i.kind = Item::STATION;
+              i.station = (int) k;
+              i.label = names[k];
+              i.playing = playing && (int) k == idx;
+              items.push_back(i);
             }
-            default: {
-              title = "Einstellungen";
-              const char *hint_edit = "Drehen zum Ändern", *hint = "Drücken zum Ändern";
-              items.push_back(back());
-              items.push_back(icon(ICON_TUNE, "Equalizer", ""));
-              Item dim = gauge("Abdunkeln nach", dim_step(id(dim_after).state), 0, DIM_STEP_COUNT - 1,
-                               edit && sel == 2 ? hint_edit : hint);
-              dim.value_text = dim_text(id(dim_after).state);
-              items.push_back(dim);
-              break;
-            }
+          } else {
+            items.push_back(icon(ICON_TUNE, "Equalizer", ""));
+            Item dim = gauge("Abdunkeln nach", dim_step(id(dim_after).state), 0, DIM_STEP_COUNT - 1,
+                             edit && sel == 1 ? "Drehen zum Ändern" : "");
+            dim.value_text = dim_text(id(dim_after).state);
+            items.push_back(dim);
+            items.push_back(icon(ICON_INFO, "Info", ""));
           }
           Carousel c{};
-          c.title = id(c_title);
           c.name = id(c_name);
           c.sub = id(c_sub);
-          c.count = id(c_count);
           c.chev_left = id(c_chev_l);
           c.chev_right = id(c_chev_r);
           c.center = {id(c_root), id(c_logo), id(c_img), id(c_ini), id(c_icon), id(c_arc), id(c_arc_lbl)};
           c.left = {id(l_root), id(l_logo), id(l_img), id(l_ini), id(l_icon), id(l_arc), id(l_arc_lbl)};
           c.right = {id(r_root), id(r_logo), id(r_img), id(r_ini), id(r_icon), id(r_arc), id(r_arc_lbl)};
-          lv_obj_t *dots[9] = {id(dot0), id(dot1), id(dot2), id(dot3), id(dot4), id(dot5), id(dot6), id(dot7), id(dot8)};
-          for (int k = 0; k < 9; k++) c.dots[k] = dots[k];
-          c.name_fonts[0] = id(f13m)->get_lv_font();
-          c.name_fonts[1] = id(f12m)->get_lv_font();
-          c.name_fonts[2] = id(f11m)->get_lv_font();
+          c.name_fonts[0] = id(f16m)->get_lv_font();
+          c.name_fonts[1] = id(f13m)->get_lv_font();
+          c.name_fonts[2] = id(f12m)->get_lv_font();
           id(menu_sel) = std::max(0, std::min(sel, (int) items.size() - 1));
-          render(c, title, items, id(menu_sel), edit, id(logos), names);
+          render(c, items, id(menu_sel), edit, id(logos), names);
 
   # Move the selection by dir within the current menu.
   - id: clamp_sel
@@ -1096,8 +1072,7 @@ script:
       dir: int
     then:
       - lambda: |-
-          int n = id(menu) == 0 ? 4 : 3;  // main menu 4 tiles, settings 3
-          if (id(menu) == 1) n = (int) id(station_names).size() + 1;
+          const int n = id(menu) == 0 ? id(menu_first) + (int) id(station_names).size() : 3;
           id(menu_sel) = std::max(0, std::min(n - 1, id(menu_sel) + dir));
 
   # Info page: all values on one page.
@@ -1120,7 +1095,7 @@ script:
       - lvgl.page.show: info_page
       - script.execute: menu_timeout
 
-  # One level up: sub menus and info go to the main menu, the main menu goes home.
+  # One level up: settings go to the main menu, info to the settings, the main menu goes home.
   - id: menu_back
     then:
       - if:
@@ -1140,60 +1115,50 @@ script:
                 else:
                   - script.execute:
                       id: open_menu
-                      m: 0
-                      s: !lambda |-
-                        if (id(ui_page) == 3) return 3;
-                        return id(menu) == 1 ? 1 : 2;
+                      m: !lambda "return id(ui_page) == 3 ? 1 : 0;"
+                      s: !lambda "return id(ui_page) == 3 ? 2 : 0;"
 
-  # Click on a tile.
+  # Click on a tile. Main menu: settings, back to the playing source, or play a station.
+  # Settings: equalizer page, edit the dim time, info page.
   - id: menu_click
     then:
       - if:
           condition:
-            lambda: "return id(menu_sel) == 0;"
+            lambda: "return id(menu) == 0;"
           then:
-            - script.execute: menu_back
-          else:
             - if:
                 condition:
-                  lambda: "return id(menu) == 0 && id(menu_sel) == 1;"
+                  lambda: "return id(menu_sel) == 0;"
                 then:
                   - script.execute:
                       id: open_menu
                       m: 1
-                      s: !lambda "return id(station_index) + 1;"
+                      s: 0
                 else:
                   - if:
                       condition:
-                        lambda: "return id(menu) == 0 && id(menu_sel) == 2;"
+                        lambda: "return id(menu_sel) < id(menu_first);"
                       then:
-                        - script.execute:
-                            id: open_menu
-                            m: 2
-                            s: 1
+                        - script.execute: go_home
                       else:
-                        - if:
-                            condition:
-                              lambda: "return id(menu) == 0;"
-                            then:
-                              - script.execute: open_info
-                            else:
-                              - if:
-                                  condition:
-                                    lambda: "return id(menu) == 1;"
-                                  then:
-                                    - script.execute:
-                                        id: play_station
-                                        idx: !lambda "return id(menu_sel) - 1;"
-                                  else:
-                                    - if:
-                                        condition:
-                                          lambda: "return id(menu_sel) == 1;"
-                                        then:
-                                          - script.execute: open_eq
-                                        else:
-                                          - lambda: "id(menu_edit) = !id(menu_edit);"
-                                          - script.execute: render_menu
+                        - script.execute:
+                            id: play_station
+                            idx: !lambda "return id(menu_sel) - id(menu_first);"
+          else:
+            - if:
+                condition:
+                  lambda: "return id(menu_sel) == 0;"
+                then:
+                  - script.execute: open_eq
+                else:
+                  - if:
+                      condition:
+                        lambda: "return id(menu_sel) == 1;"
+                      then:
+                        - lambda: "id(menu_edit) = !id(menu_edit);"
+                        - script.execute: render_menu
+                      else:
+                        - script.execute: open_info
 
   # Equalizer page (ui_page 4): bass, mid and treble as vertical sliders.
   # Turn selects a band, click switches to editing (accent colour), turn changes it.
@@ -1277,8 +1242,8 @@ script:
           else:
             - script.execute:
                 id: open_menu
-                m: 2
-                s: 1
+                m: 1
+                s: 0
 
   # Leave menus, info and the equalizer page after 20 s without input.
   - id: menu_timeout
@@ -1341,7 +1306,12 @@ script:
                         lambda: "return id(ui_page) <= 1;"
                       then:
                         - lambda: "id(volume_steps) += dir;"
-                        - script.execute: apply_volume
+                        - if:
+                            condition:
+                              not:
+                                script.is_running: apply_volume
+                            then:
+                              - script.execute: apply_volume
 
   # Apply collected knob steps at most every 120 ms. One volume change per detent
   # (15-20 per second when turning fast) caused audible artifacts; the web slider,
@@ -1372,41 +1342,32 @@ script:
             - script.execute: display_wake
             - if:
                 condition:
-                  lambda: "return id(ui_page) == 0;"
+                  lambda: "return id(ui_page) <= 1;"
                 then:
-                  - script.execute:
-                      id: open_menu
-                      m: 0
-                      s: 1
+                  - script.execute: open_main
                 else:
+                  # Exclusive branches: menu_click may switch to page 3 or 4.
                   - if:
                       condition:
-                        lambda: "return id(ui_page) == 1;"
+                        lambda: "return id(ui_page) == 2;"
                       then:
-                        - script.execute:
-                            id: open_menu
-                            m: !lambda "return id(radio_active) ? 1 : 0;"
-                            s: !lambda "return id(radio_active) ? id(station_index) + 1 : 0;"
+                        - script.execute: menu_click
+                        - script.execute: menu_timeout
                       else:
                         - if:
                             condition:
-                              lambda: "return id(ui_page) == 2;"
+                              lambda: "return id(ui_page) == 3;"
                             then:
-                              - script.execute: menu_click
-                              - script.execute: menu_timeout
+                              - script.execute: menu_back
                             else:
-                              - if:
-                                  condition:
-                                    lambda: "return id(ui_page) == 3;"
-                                  then:
-                                    - script.execute: menu_back
                               - if:
                                   condition:
                                     lambda: "return id(ui_page) == 4;"
                                   then:
                                     - script.execute: eq_click
 
-  # Hold: stop playback on the clock and playing screen and open the main menu; one level back in menus.
+  # Hold: on the clock and playing screen stop playback and open the main menu;
+  # elsewhere one level back.
   - id: knob_hold
     then:
       - if:
@@ -1427,24 +1388,13 @@ script:
                           - media_player.is_paused: media_player_sendspin
                       then:
                         - media_player.stop: media_player_sendspin
-                        - script.execute:
-                            id: open_menu
-                            m: 0
-                            s: 1
+                        - script.execute: open_main
                 else:
-                  # In the main menu, holding stops playback; elsewhere it goes one level back.
                   - if:
                       condition:
-                        lambda: "return id(ui_page) == 2 && id(menu) == 0 && id(is_now_playing);"
+                        lambda: "return id(ui_page) == 2 || id(ui_page) == 3;"
                       then:
-                        - media_player.stop: media_player_sendspin
-                        - script.execute: menu_timeout
-                      else:
-                        - if:
-                            condition:
-                              lambda: "return id(ui_page) == 2 || id(ui_page) == 3;"
-                            then:
-                              - script.execute: menu_back
+                        - script.execute: menu_back
                   - if:
                       condition:
                         lambda: "return id(ui_page) == 4;"
@@ -1607,11 +1557,12 @@ font:
   # Tabler line icons: volume, mute, chevrons, back, tune, info, radio,
   # settings, music, pause.
   - {file: {type: web, url: '${tabler_font}'}, id: ti16, size: 16, bpp: 4, glyphs: ["", ""]}
-  - {file: {type: web, url: '${tabler_font}'}, id: ti20, size: 20, bpp: 4,
-     glyphs: ["", "", "", "", "", ""]}
+  # Carousel icons: settings, cast, equalizer, info.
+  - {file: {type: web, url: '${tabler_font}'}, id: ti24, size: 24, bpp: 4, glyphs: ["", "", "", ""]}
+  - {file: {type: web, url: '${tabler_font}'}, id: ti40, size: 40, bpp: 4, glyphs: ["", "", "", ""]}
   - {file: {type: web, url: '${tabler_font}'}, id: ti22, size: 22, bpp: 4, glyphs: [""]}
-  - {file: {type: web, url: '${tabler_font}'}, id: ti34, size: 34, bpp: 4,
-     glyphs: ["", "", "", "", "", "", ""]}
+  # Cover placeholder on the playing screen.
+  - {file: {type: web, url: '${tabler_font}'}, id: ti34, size: 34, bpp: 4, glyphs: [""]}
 
 ########################################################################
 # Colours (see radio_ui.h): background 0x060608, text 0xFFFFFF, secondary
@@ -1769,93 +1720,82 @@ lvgl:
     - id: carousel_page
       styles: page_style
       widgets:
-        - label: {id: c_title, text: "", x: 0, y: 1, width: 160, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
         - obj:
             id: c_root
             styles: plain
-            x: 52
-            y: 20
-            width: 56
-            height: 56
+            x: 46
+            y: 16
+            width: 68
+            height: 68
             widgets:
               - obj:
                   id: c_logo
                   styles: logo_box
                   x: 0
                   y: 0
-                  width: 56
-                  height: 56
-                  radius: 12
+                  width: 68
+                  height: 68
+                  radius: 14
                   scrollable: false
                   hidden: true
                   widgets:
                     - image: {id: c_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
-                    - label: {id: c_ini, text: "", align: CENTER, text_font: f13m, text_color: 0xC4C4CC}
-              - label: {id: c_icon, text: "", align: CENTER, text_font: ti34, text_color: 0xFFFFFF, hidden: true}
-              - arc: {id: c_arc, align: CENTER, width: 50, height: 50, min_value: 0, max_value: 18, value: 0, hidden: true}
+                    - label: {id: c_ini, text: "", align: CENTER, text_font: f16m, text_color: 0xC4C4CC}
+              - label: {id: c_icon, text: "", align: CENTER, text_font: ti40, text_color: 0xFFFFFF, hidden: true}
+              - arc: {id: c_arc, align: CENTER, width: 60, height: 60, min_value: 0, max_value: 18, value: 0, hidden: true}
               - label: {id: c_arc_lbl, text: "", align: CENTER, text_font: f17m, text_color: 0xFFFFFF, hidden: true}
         - obj:
             id: l_root
             styles: plain
-            x: 4
-            y: 32
-            width: 32
-            height: 32
+            x: 0
+            y: 30
+            width: 40
+            height: 40
             widgets:
               - obj:
                   id: l_logo
                   styles: logo_box
                   x: 0
                   y: 0
-                  width: 32
-                  height: 32
-                  radius: 7
+                  width: 40
+                  height: 40
+                  radius: 8
                   scrollable: false
                   hidden: true
                   widgets:
                     - image: {id: l_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
                     - label: {id: l_ini, text: "", align: CENTER, text_font: f10m, text_color: 0xC4C4CC}
-              - label: {id: l_icon, text: "", align: CENTER, text_font: ti20, text_color: 0xFFFFFF, hidden: true}
-              - arc: {id: l_arc, align: CENTER, width: 28, height: 28, min_value: 0, max_value: 18, value: 0, hidden: true}
+              - label: {id: l_icon, text: "", align: CENTER, text_font: ti24, text_color: 0xFFFFFF, hidden: true}
+              - arc: {id: l_arc, align: CENTER, width: 35, height: 35, min_value: 0, max_value: 18, value: 0, hidden: true}
               - label: {id: l_arc_lbl, text: "", align: CENTER, text_font: f10m, text_color: 0xFFFFFF, hidden: true}
         - obj:
             id: r_root
             styles: plain
-            x: 124
-            y: 32
-            width: 32
-            height: 32
+            x: 120
+            y: 30
+            width: 40
+            height: 40
             widgets:
               - obj:
                   id: r_logo
                   styles: logo_box
                   x: 0
                   y: 0
-                  width: 32
-                  height: 32
-                  radius: 7
+                  width: 40
+                  height: 40
+                  radius: 8
                   scrollable: false
                   hidden: true
                   widgets:
                     - image: {id: r_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
                     - label: {id: r_ini, text: "", align: CENTER, text_font: f10m, text_color: 0xC4C4CC}
-              - label: {id: r_icon, text: "", align: CENTER, text_font: ti20, text_color: 0xFFFFFF, hidden: true}
-              - arc: {id: r_arc, align: CENTER, width: 28, height: 28, min_value: 0, max_value: 18, value: 0, hidden: true}
+              - label: {id: r_icon, text: "", align: CENTER, text_font: ti24, text_color: 0xFFFFFF, hidden: true}
+              - arc: {id: r_arc, align: CENTER, width: 35, height: 35, min_value: 0, max_value: 18, value: 0, hidden: true}
               - label: {id: r_arc_lbl, text: "", align: CENTER, text_font: f10m, text_color: 0xFFFFFF, hidden: true}
-        - label: {id: c_chev_l, text: "", x: 28, y: 40, text_font: ti16, text_color: 0xC4C4CC, hidden: true}
-        - label: {id: c_chev_r, text: "", x: 116, y: 40, text_font: ti16, text_color: 0xC4C4CC, hidden: true}
-        - label: {id: c_name, text: "", height: 16, x: 6, y: 83, width: 148, long_mode: DOT, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
-        - label: {id: c_sub, text: "", height: 15, x: 6, y: 99, width: 148, long_mode: DOT, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
-        - label: {id: c_count, text: "", x: 0, y: 114, width: 160, text_align: CENTER, text_font: f10m, text_color: 0xC4C4CC, hidden: true}
-        - obj: {id: dot0, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
-        - obj: {id: dot1, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
-        - obj: {id: dot2, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
-        - obj: {id: dot3, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
-        - obj: {id: dot4, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
-        - obj: {id: dot5, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
-        - obj: {id: dot6, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
-        - obj: {id: dot7, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
-        - obj: {id: dot8, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+        - label: {id: c_chev_l, text: "", x: 24, y: 42, text_font: ti16, text_color: 0xC4C4CC, hidden: true}
+        - label: {id: c_chev_r, text: "", x: 120, y: 42, text_font: ti16, text_color: 0xC4C4CC, hidden: true}
+        - label: {id: c_name, text: "", height: 19, x: 6, y: 95, width: 148, long_mode: DOT, text_align: CENTER, text_font: f16m, text_color: 0xFFFFFF}
+        - label: {id: c_sub, text: "", height: 15, x: 6, y: 112, width: 148, long_mode: DOT, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
 
     # 3: Info, all values on one page. Click or hold returns to the menu.
     - id: info_page

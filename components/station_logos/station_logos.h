@@ -2,11 +2,11 @@
 
 #include <atomic>
 #include <cstdint>
-#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
+#include <esp_partition.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <lvgl.h>
@@ -15,28 +15,27 @@
 
 namespace esphome::station_logos {
 
-static constexpr int BIG = 56;    // selected tile and playing screen
-static constexpr int SMALL = 32;  // neighbour tiles in the carousel
-static constexpr int BIG_RADIUS = 12;
-static constexpr int SMALL_RADIUS = 7;
-static constexpr float SMALL_BRIGHTNESS = 0.6f;  // neighbour tiles are shown dimmed
+static constexpr int STORE = 68;                // stored logo size, also the largest tile
+static constexpr int SLOT_COUNT = 4;            // logos on screen at once
+static constexpr float DIM_BRIGHTNESS = 0.6f;   // neighbour tiles are shown dimmed
 
 /// Two letters for the fallback tile ("Radio Bob" -> "RB", "SWR3" -> "SW").
 std::string initials(const std::string &name);
 
 /// Fill a logo box (container + image + initials label) for one station.
 /// Shows the logo when one is loaded, otherwise a grey tile with initials.
-/// dim: neighbour tile, so the fallback tile is drawn darker (the small logo is dimmed already).
+/// dim: neighbour tile, so the fallback tile is drawn darker (the logo itself is dimmed already).
 void show_logo(lv_obj_t *box, lv_obj_t *img, lv_obj_t *label, const lv_image_dsc_t *logo,
                const std::string &name, bool dim = false);
 
-/// Loads station logos in a background task and keeps them in PSRAM.
+/// Loads station logos in a background task and stores them in the flash partition "logos".
 ///
 /// For each station the logo URL is either given (override) or looked up at
-/// radio-browser.info by stream URL, then by name. The image is resized by
-/// wsrv.nl to 56x56 PNG, decoded with pngle and stored as RGB565 together with
-/// a 32x32 copy. LVGL may only be touched from the main loop, so the task only
-/// fills buffers and the main loop polls take_changed().
+/// radio-browser.info by stream URL, then by name. wsrv.nl resizes the image to a
+/// 68x68 PNG; it is decoded once and stored as RGB565 in a fixed-size flash record,
+/// so it survives restarts. Only the logos on screen are kept in RAM: get() reads a
+/// record and scales it into one of SLOT_COUNT display buffers. Without the partition
+/// the records are kept in PSRAM instead.
 class StationLogos : public Component {
  public:
   void setup() override;
@@ -46,9 +45,10 @@ class StationLogos : public Component {
   void load(const std::vector<std::string> &names, const std::vector<std::string> &stream_urls,
             const std::vector<std::string> &logo_urls);
 
-  /// Logo of station i, or nullptr while it is missing.
-  const lv_image_dsc_t *big(size_t i);
-  const lv_image_dsc_t *small(size_t i);
+  /// Logo of station i at size x size in display buffer slot, or nullptr while it is missing.
+  /// Each slot belongs to one image widget; the buffer is reused for the next call on that slot.
+  /// Main loop only.
+  const lv_image_dsc_t *get(int slot, size_t i, int size, bool dim);
 
   /// True once after new logos became available since the last call.
   bool take_changed() { return this->changed_.exchange(false); }
@@ -58,26 +58,40 @@ class StationLogos : public Component {
     std::string name;
     std::string stream_url;
     std::string logo_url;
+    uint32_t key;
   };
-  struct Logo {
-    uint16_t *big_px{nullptr};
-    uint16_t *small_px{nullptr};
-    lv_image_dsc_t big_dsc{};
-    lv_image_dsc_t small_dsc{};
-    ~Logo();
+  struct Slot {
+    uint16_t *px{nullptr};
+    lv_image_dsc_t dsc{};
+    uint32_t key{0};
+    int size{0};
+    bool dim{false};
   };
 
   static void task_entry_(void *arg);
   void run_();
   std::vector<std::string> candidates_(const Job &job);
-  std::unique_ptr<Logo> fetch_(const std::string &logo_url);
+  bool fetch_(const std::string &logo_url, uint16_t *out);
+  bool read_record_(int r, uint16_t *out);
+  bool write_record_(int r, uint32_t key, const uint16_t *px);
+
+  const esp_partition_t *partition_{nullptr};
+  int record_count_{0};
+  std::vector<uint32_t> record_keys_;  // key per record, 0 = empty; background task only
+  std::vector<uint16_t *> mem_records_;  // PSRAM records when the partition is missing
 
   std::mutex mutex_;
   std::vector<Job> jobs_;
-  std::vector<std::unique_ptr<Logo>> logos_;
+  std::vector<int> record_of_;  // record per station, -1 while missing
   uint32_t generation_{0};
   TaskHandle_t task_{nullptr};
   std::atomic<bool> changed_{false};
+
+  // Main loop buffers for get().
+  Slot slots_[SLOT_COUNT];
+  uint16_t *read_px_{nullptr};
+  uint8_t *rgb_{nullptr};
+  uint8_t *scaled_{nullptr};
 };
 
 }  // namespace esphome::station_logos

@@ -16,6 +16,10 @@ static constexpr uint32_t DIM = 0x787880;
 static constexpr uint32_t TRACK = 0x46464E;
 static constexpr uint32_t ACCENT = 0xFFB020;
 
+// Tile sizes in the carousel; the boxes in the YAML match them.
+static constexpr int TILE_CENTER = 68;
+static constexpr int TILE_SIDE = 40;
+
 // Tabler icon codepoints, UTF-8 encoded.
 static const char *const ICON_BACK = "";
 static const char *const ICON_TUNE = "";
@@ -67,14 +71,11 @@ struct Slot {
 
 /// All widgets of the carousel page.
 struct Carousel {
-  lv_obj_t *title;
   lv_obj_t *name;
   lv_obj_t *sub;
-  lv_obj_t *count;
   lv_obj_t *chev_left;
   lv_obj_t *chev_right;
   Slot center, left, right;
-  lv_obj_t *dots[9];
   const lv_font_t *name_fonts[3];  // largest first
 };
 
@@ -87,9 +88,10 @@ const lv_font_t *fit_font(const char *text, const lv_font_t *const *fonts, int c
 /// "0", "+6" or "-1.5" for a gain in dB.
 std::string gain_text(float value);
 
-/// Show items[sel] in the centre with its neighbours, name, sub text and position.
+/// Show items[sel] in the centre with its neighbours, name and sub text.
 /// While editing, the neighbours are hidden and arrows appear left and right.
-void render(const Carousel &c, const char *title, const std::vector<Item> &items, int sel, bool editing,
+/// Station logos use the display buffer slots 0 (centre), 1 (left) and 2 (right).
+void render(const Carousel &c, const std::vector<Item> &items, int sel, bool editing,
             station_logos::StationLogos *logos, const std::vector<std::string> &names);
 
 }  // namespace esphome::radio_ui

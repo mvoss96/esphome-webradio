@@ -56,15 +56,16 @@ Per-device settings go under `substitutions:` in the device file:
 | Screen | Turn | Click | Hold |
 |--------|------|-------|------|
 | Clock | Volume | Main menu | – |
-| Now playing | Volume | Radio: station list; Sendspin: main menu | Stop, then main menu |
-| Main menu | Move | Select | Stop playback (back to the clock when nothing plays) |
-| Other menus | Move | Select / edit | Back |
+| Now playing | Volume | Main menu | Stop, then main menu |
+| Main menu | Move | Settings / back to what plays / play the station | Back to the clock or playing screen |
+| Settings | Move | Equalizer / edit the dim time / info | Back |
 | Equalizer | Select band / change it | Edit on/off | Back |
 
-The first main menu tile shows what plays (the station or Sendspin) and leads back to
-it; with nothing playing it is "Zurück" to the clock.
+The main menu is one row: "Einstellungen" on the left, then the playing source (Sendspin) if
+any, then all stations. It opens on the playing station or source, otherwise on the last
+station. The playing tile has an accent border.
 
-The equalizer page (settings menu → Equalizer) shows bass, mid and treble as sliders.
+The equalizer page (Einstellungen → Equalizer) shows bass, mid and treble as sliders.
 
 While the display is dimmed, the first input only wakes it. The dim time is a setting in the
 settings menu (and the Home Assistant entity "Display abdunkeln nach"); 0 turns dimming off.
@@ -101,7 +102,7 @@ whether Home Assistant is connected. Actions:
 | Component | Purpose |
 |-----------|---------|
 | `equalizer` | Speaker platform with biquad filters between the media player and the I²S speaker. |
-| `station_logos` | Looks up station logos (radio-browser.info), resizes them via wsrv.nl, keeps them in PSRAM. |
+| `station_logos` | Looks up station logos (radio-browser.info), resizes them via wsrv.nl, stores them in the `logos` flash partition and scales only the logos on screen into four display buffers. |
 | `radio_ui` | C++ helpers for the LVGL carousel. |
 | `radio_web` | The web page and its API on ESPHome's web server. |
 
@@ -112,6 +113,7 @@ ESPHome enables network buffers sized for 8 MB modules and allocations start fai
 The Sendspin buffer is limited to 300 kB for the same reason.
 
 The flash holds two 3 MB app partitions for OTA, the settings (NVS) and a 1.5 MB `logos` partition
-for station logos. Changing the partition table needs one flash over USB; it moves the NVS
+for station logos (one 12 KB record per logo, 128 records). Without that partition the logos
+are kept in PSRAM and downloaded again after every restart. Changing the partition table needs one flash over USB; it moves the NVS
 partition, so the station list and settings are reset. Save the list beforehand with
 `GET /api/stations` and restore it with `POST /api/stations`.
