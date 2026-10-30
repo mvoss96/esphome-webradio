@@ -1015,7 +1015,8 @@ script:
                 i.playing = true;
                 items.push_back(i);
               } else if (!id(radio_active) && id(is_now_playing)) {
-                Item i = icon(ICON_MUSIC, "Sendspin", "");
+                Item i = icon(ICON_CAST, "Sendspin", "");
+                i.letter = "S";
                 i.playing = true;
                 items.push_back(i);
               } else {
@@ -1034,10 +1035,7 @@ script:
                 i.kind = Item::STATION;
                 i.station = (int) k;
                 i.label = names[k];
-                if (playing && (int) k == idx) {
-                  i.sub = "Läuft gerade";
-                  i.playing = true;
-                }
+                i.playing = playing && (int) k == idx;
                 items.push_back(i);
               }
               break;
@@ -1571,10 +1569,10 @@ font:
   # settings, music, pause.
   - {file: {type: web, url: '${tabler_font}'}, id: ti16, size: 16, bpp: 4, glyphs: ["", ""]}
   - {file: {type: web, url: '${tabler_font}'}, id: ti20, size: 20, bpp: 4,
-     glyphs: ["", "", "", "", "", ""]}
+     glyphs: ["", "", "", "", "", ""]}
   - {file: {type: web, url: '${tabler_font}'}, id: ti22, size: 22, bpp: 4, glyphs: [""]}
   - {file: {type: web, url: '${tabler_font}'}, id: ti34, size: 34, bpp: 4,
-     glyphs: ["", "", "", "", "", ""]}
+     glyphs: ["", "", "", "", "", "", ""]}
 
 ########################################################################
 # Colours (see radio_ui.h): background 0x060608, text 0xFFFFFF, secondary
@@ -1748,6 +1746,7 @@ lvgl:
                   width: 56
                   height: 56
                   radius: 12
+                  scrollable: false
                   hidden: true
                   widgets:
                     - image: {id: c_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
@@ -1771,6 +1770,7 @@ lvgl:
                   width: 32
                   height: 32
                   radius: 7
+                  scrollable: false
                   hidden: true
                   widgets:
                     - image: {id: l_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
@@ -1794,6 +1794,7 @@ lvgl:
                   width: 32
                   height: 32
                   radius: 7
+                  scrollable: false
                   hidden: true
                   widgets:
                     - image: {id: r_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
