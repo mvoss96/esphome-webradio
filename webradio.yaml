@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.9.7-airplay"
+    version: "1.9.8-airplay"
   on_boot:
     priority: -100
     then:
@@ -475,6 +475,10 @@ sendspin:
   id: sendspin_hub
   task_stack_in_psram: true
 
+airplay:
+  name: Web Radio
+  task_stack_in_psram: true
+
 media_source:
   - platform: sendspin
     id: sendspin_source
@@ -485,8 +489,6 @@ media_source:
     id: http_source
   - platform: airplay
     id: airplay_source
-    name: Web Radio
-    task_stack_in_psram: true
 
 media_player:
   - platform: speaker_source
@@ -630,19 +632,19 @@ binary_sensor:
 
 text_sensor:
   - platform: airplay
-    airplay_id: airplay_source
-    title:
-      id: airplay_title
-      internal: true
-      on_value:
-        - if:
-            condition:
-              lambda: "return id(airplay_active) && id(ui_page) == 1;"
-            then:
-              - script.execute: update_playing_layout
-    artist:
-      id: airplay_artist
-      internal: true
+    type: title
+    id: airplay_title
+    internal: true
+    on_value:
+      - if:
+          condition:
+            lambda: "return id(airplay_active) && id(ui_page) == 1;"
+          then:
+            - script.execute: update_playing_layout
+  - platform: airplay
+    type: artist
+    id: airplay_artist
+    internal: true
 
   # Name of the station playing from the list, for Home Assistant.
   - platform: template
@@ -1539,7 +1541,6 @@ image:
   # Cover from the AirPlay sender; shown by update_playing_layout while AirPlay plays.
   - platform: airplay
     id: airplay_cover
-    airplay_id: airplay_source
     type: RGB565
     resize: 74x74
     max_size: 300kB
