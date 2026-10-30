@@ -112,10 +112,14 @@ class EqualizerSpeaker : public Component, public speaker::Speaker {
 
   bool enabled_{true};
 
-  // Scratch buffers grown lazily on first play() with a given chunk size and
-  // reused thereafter. Float buffer holds the deinterleaved samples for the
-  // esp-dsp cascade; int16 buffer holds the saturated output handed to the
-  // downstream speaker.
+  // Most frames one play() call processes. play() reports fewer bytes when a caller
+  // hands over more, and the caller sends the rest with the next call.
+  static constexpr size_t MAX_FRAMES = 1024;
+
+  // Scratch buffers, allocated once in setup() for MAX_FRAMES stereo frames.
+  // play() runs in the audio tasks; allocating there failed for large chunks
+  // (Sendspin FLAC) and aborted the firmware. Float buffer holds the samples
+  // for the esp-dsp cascade; int16 buffer holds the output for the downstream speaker.
   std::vector<float> float_scratch_;
   std::vector<int16_t> int16_scratch_;
 

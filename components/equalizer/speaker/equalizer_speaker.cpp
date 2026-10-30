@@ -40,6 +40,9 @@ void EqualizerSpeaker::setup() {
   this->output_speaker_->add_audio_output_callback(
       [this](uint32_t new_frames, int64_t write_timestamp) { this->audio_output_callback_(new_frames, write_timestamp); });
 
+  this->float_scratch_.resize(MAX_FRAMES * 2);
+  this->int16_scratch_.resize(MAX_FRAMES * 2);
+
   // Nothing else to do until something calls start().
   this->disable_loop();
 }
@@ -163,10 +166,7 @@ void EqualizerSpeaker::recompute_coefficients_(Band &band) const {
 // the macros in esp-dsp's dsps_biquad.h.
 void EqualizerSpeaker::process_frames_(const int16_t *input, int16_t *output, size_t frame_count,
                                        uint8_t channels) {
-  const size_t total_samples = frame_count * channels;
-  if (this->float_scratch_.size() < total_samples) {
-    this->float_scratch_.resize(total_samples);
-  }
+  const size_t total_samples = frame_count * channels;  // at most MAX_FRAMES * 2, see play()
   float *buf = this->float_scratch_.data();
 
   // int16 → float, normalised to ±1.0.
@@ -218,16 +218,12 @@ size_t EqualizerSpeaker::play(const uint8_t *data, size_t length, TickType_t tic
     return this->output_speaker_->play(data, length, ticks_to_wait);
   }
 
-  const size_t frame_count = length / bytes_per_frame;
-  if (frame_count == 0) {
+  if (length < bytes_per_frame) {
     // Trailing partial frame — forward as-is, downstream knows what to do.
     return this->output_speaker_->play(data, length, ticks_to_wait);
   }
-
+  const size_t frame_count = std::min(length / bytes_per_frame, MAX_FRAMES);
   const size_t total_samples = frame_count * this->channels_;
-  if (this->int16_scratch_.size() < total_samples) {
-    this->int16_scratch_.resize(total_samples);
-  }
 
   this->process_frames_(reinterpret_cast<const int16_t *>(data), this->int16_scratch_.data(), frame_count,
                         this->channels_);
