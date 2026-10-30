@@ -2,6 +2,9 @@
 # Use as a package next to the device's name and Wi-Fi/API settings, see example/web-radio.yaml.
 
 substitutions:
+  # Lowest frequency sent to the speaker. 90 Hz suits a Visaton FRS 8 M in a closed 1 l box;
+  # override it in the device file for another speaker or enclosure.
+  highpass_frequency: 90Hz
   # Tabler icon font, pinned so the icon code points cannot change.
   tabler_font: https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.50.0/dist/fonts/tabler-icons.ttf
 
@@ -301,7 +304,7 @@ speaker:
     bands:
       # 0: Protect the cone from bass it cannot reproduce.
       - type: high_pass
-        frequency: 90Hz
+        frequency: ${highpass_frequency}
         q: 0.707
       # 1: Bass balance. Lowers everything above 150 Hz instead of boosting
       #    below, so the signal can never clip. Gain = -"EQ Bass".

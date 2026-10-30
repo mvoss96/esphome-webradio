@@ -45,6 +45,12 @@ The package expects the device file (or another package) to provide `logger`, `a
 
 Tested with ESPHome 2026.10.1.
 
+Per-device settings go under `substitutions:` in the device file:
+
+| Substitution | Default | Purpose |
+|--------------|---------|---------|
+| `highpass_frequency` | `90Hz` | Lowest frequency sent to the speaker; 90 Hz fits a Visaton FRS 8 M in a closed 1 l box. |
+
 ## Operation
 
 | Screen | Turn | Click | Hold |

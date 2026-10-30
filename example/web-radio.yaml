@@ -3,6 +3,10 @@ esphome:
   name: web-radio
   friendly_name: Web Radio
 
+# Optional per-device settings, see README.
+# substitutions:
+#   highpass_frequency: 80Hz
+
 packages:
   # Logger, API, OTA, Wi-Fi and the diagnostic sensors the info page uses
   # (ids wifi_signal_strength and ip_address).
