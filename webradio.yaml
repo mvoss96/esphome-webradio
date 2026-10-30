@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.9.1-airplay"
+    version: "1.9.2-airplay"
   on_boot:
     priority: -100
     then:
@@ -1011,7 +1011,8 @@ script:
                 i.playing = true;
                 items.push_back(i);
               } else if (id(airplay_active) && id(is_now_playing)) {
-                Item i = icon(ICON_MUSIC, "AirPlay", "");
+                Item i = icon(ICON_CAST, "AirPlay", "");
+                i.letter = "A";
                 i.playing = true;
                 items.push_back(i);
               } else if (!id(radio_active) && id(is_now_playing)) {
