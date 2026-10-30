@@ -39,8 +39,9 @@ struct Item {
   int station{-1};  // index into the station list for STATION
   float value{0}, lo{0}, hi{1};  // GAUGE range in dB
   std::string value_text;        // GAUGE: shown instead of the dB value when set
-  const lv_image_dsc_t *image{nullptr};        // IMAGE: centre tile, 56 px
-  const lv_image_dsc_t *image_small{nullptr};  // IMAGE: side tile, 32 px
+  const lv_image_dsc_t *image{nullptr};        // IMAGE: centre tile (56 px tile)
+  const lv_image_dsc_t *image_small{nullptr};  // IMAGE: side tile (32 px tile)
+  bool playing{false};           // STATION / IMAGE: accent outline around the logo
 };
 
 /// Steps of the "dim after" setting in seconds; 0 = never.

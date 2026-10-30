@@ -9,6 +9,16 @@ static void hide(lv_obj_t *o) { lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN); }
 static void show(lv_obj_t *o) { lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN); }
 static lv_color_t col(uint32_t hex) { return lv_color_hex(hex); }
 
+// Accent outline around a logo box, drawn outside the box. The slot root lets it overflow;
+// outlines are drawn directly, without a layer buffer.
+static void mark_playing(const Slot &s, bool playing) {
+  lv_obj_add_flag(s.root, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+  lv_obj_set_style_outline_width(s.logo_box, playing ? 2 : 0, 0);
+  lv_obj_set_style_outline_pad(s.logo_box, 1, 0);
+  lv_obj_set_style_outline_color(s.logo_box, col(ACCENT), 0);
+  lv_obj_set_style_outline_opa(s.logo_box, LV_OPA_COVER, 0);
+}
+
 void style_gauge(lv_obj_t *arc, int width) {
   lv_arc_set_rotation(arc, 135);
   lv_arc_set_bg_angles(arc, 0, 270);
@@ -86,7 +96,9 @@ static void render_slot(const Slot &s, const Item *it, bool center, bool editing
       show(s.logo_box);
       const lv_image_dsc_t *logo = center ? logos->big(it->station) : logos->small(it->station);
       station_logos::show_logo(s.logo_box, s.logo_img, s.logo_lbl, logo, names[it->station], !center);
+      lv_obj_align(s.logo_img, LV_ALIGN_CENTER, 0, 0);
       lv_obj_set_style_image_opa(s.logo_img, LV_OPA_COVER, 0);
+      mark_playing(s, it->playing);
       break;
     }
     case Item::IMAGE: {
@@ -95,7 +107,12 @@ static void render_slot(const Slot &s, const Item *it, bool center, bool editing
       show(s.logo_box);
       station_logos::show_logo(s.logo_box, s.logo_img, s.logo_lbl, center ? it->image : it->image_small,
                                it->label, !center);
+      // The image is smaller than the tile and sits centred on a tile background.
+      lv_obj_set_style_bg_opa(s.logo_box, LV_OPA_COVER, 0);
+      lv_obj_set_style_bg_color(s.logo_box, col(center ? 0x26262E : 0x17171C), 0);
+      lv_obj_align(s.logo_img, LV_ALIGN_CENTER, 0, 0);
       lv_obj_set_style_image_opa(s.logo_img, center ? LV_OPA_COVER : LV_OPA_60, 0);
+      mark_playing(s, it->playing);
       break;
     }
     case Item::BACK:

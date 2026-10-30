@@ -57,7 +57,8 @@ Per-device settings go under `substitutions:` in the device file:
 |--------|------|-------|------|
 | Clock | Volume | Main menu | – |
 | Now playing | Volume | Radio: station list; Music Assistant: main menu | Stop, then main menu |
-| Menus | Move | Select / edit | Back |
+| Main menu | Move | Select | Stop playback (back to the clock when nothing plays) |
+| Other menus | Move | Select / edit | Back |
 | Equalizer | Select band / change it | Edit on/off | Back |
 
 The first main menu tile shows what plays (the station or Music Assistant) and leads back to

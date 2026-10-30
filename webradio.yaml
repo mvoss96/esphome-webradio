@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.8.2"
+    version: "1.8.3"
   on_boot:
     priority: -100
     then:
@@ -492,15 +492,16 @@ media_player:
                   lambda: "return id(ui_page) <= 1;"
                 then:
                   - script.execute: show_playing
+            - if:
+                condition:
+                  lambda: "return id(ui_page) == 2 && id(menu) == 0;"
+                then:
+                  - script.execute: render_menu
     on_play:
       - script.stop: idle_timeout
       - lvgl.widget.hide: pause_overlay
-      - if:
-          condition:
-            lambda: "return !id(is_now_playing) && !id(radio_active);"
-          then:
-            - lvgl.widget.hide: cover_art
-            - lvgl.widget.show: cover_placeholder
+      # The cover is shown and hidden only by the Sendspin image events; it can arrive
+      # before playback starts, so hiding it here lost it.
       - globals.set:
           id: is_now_playing
           value: 'true'
@@ -509,6 +510,12 @@ media_player:
             lambda: "return id(ui_page) <= 1;"
           then:
             - script.execute: show_playing
+      # In the main menu, stay there but show the playing tile right away.
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 2 && id(menu) == 0;"
+          then:
+            - script.execute: render_menu
     on_pause:
       - if:
           condition:
@@ -940,7 +947,7 @@ script:
           const char *title = "";
           switch (id(menu)) {
             case 0: {
-              title = "Menü";
+              title = "";  // the main menu needs no heading
               // Main menu tiles show only their name. The first tile leads back to what plays:
               // the station, Music Assistant, or the clock (Zurück).
               if (playing) {
@@ -948,6 +955,7 @@ script:
                 i.kind = Item::STATION;
                 i.station = idx;
                 i.label = names[idx];
+                i.playing = true;
                 items.push_back(i);
               } else if (!id(radio_active) && id(is_now_playing)) {
                 Item i;
@@ -955,6 +963,7 @@ script:
                 i.label = "Music Assistant";
                 i.image = id(ma_logo)->get_lv_image_dsc();
                 i.image_small = id(ma_logo_small)->get_lv_image_dsc();
+                i.playing = true;
                 items.push_back(i);
               } else {
                 items.push_back(back());
@@ -972,7 +981,10 @@ script:
                 i.kind = Item::STATION;
                 i.station = (int) k;
                 i.label = names[k];
-                if (playing && (int) k == idx) i.sub = "Läuft gerade";
+                if (playing && (int) k == idx) {
+                  i.sub = "Läuft gerade";
+                  i.playing = true;
+                }
                 items.push_back(i);
               }
               break;
@@ -1132,7 +1144,6 @@ script:
           using namespace esphome::radio_ui;
           esphome::number::Number *nums[3] = {id(eq_bass), id(eq_mid), id(eq_treble)};
           static const float LO[3] = {0, -12, -12}, HI[3] = {9, 6, 6};
-          static const char *const NAMES[3] = {"Bass", "Mitten", "Höhen"};
           lv_obj_t *fills[3] = {id(eq_fill0), id(eq_fill1), id(eq_fill2)};
           lv_obj_t *knobs[3] = {id(eq_knob0), id(eq_knob1), id(eq_knob2)};
           lv_obj_t *labels[3] = {id(eq_lbl0), id(eq_lbl1), id(eq_lbl2)};
@@ -1152,7 +1163,8 @@ script:
             lv_obj_set_style_bg_color(knobs[k], c, 0);
             lv_obj_set_style_text_color(labels[k], lv_color_hex(k == sel ? TEXT : DIM), 0);
           }
-          const std::string text = std::string(NAMES[sel]) + "  " + gain_text(nums[sel]->state) + " dB";
+          // The selected band is marked by its label; the line below shows only its value.
+          const std::string text = gain_text(nums[sel]->state) + " dB";
           lv_label_set_text(id(eq_value), text.c_str());
           lv_obj_set_style_text_color(id(eq_value), lv_color_hex(id(eq_edit) ? ACCENT : TEXT), 0);
 
@@ -1349,11 +1361,19 @@ script:
                             m: 0
                             s: 1
                 else:
+                  # In the main menu, holding stops playback; elsewhere it goes one level back.
                   - if:
                       condition:
-                        lambda: "return id(ui_page) == 2 || id(ui_page) == 3;"
+                        lambda: "return id(ui_page) == 2 && id(menu) == 0 && id(is_now_playing);"
                       then:
-                        - script.execute: menu_back
+                        - media_player.stop: media_player_sendspin
+                        - script.execute: menu_timeout
+                      else:
+                        - if:
+                            condition:
+                              lambda: "return id(ui_page) == 2 || id(ui_page) == 3;"
+                            then:
+                              - script.execute: menu_back
                   - if:
                       condition:
                         lambda: "return id(ui_page) == 4;"
@@ -1464,13 +1484,13 @@ image:
   - platform: file
     file: https://brands.home-assistant.io/music_assistant/icon@2x.png
     id: ma_logo
-    resize: 56x56
+    resize: 36x36
     type: RGB565
     transparency: alpha_channel
   - platform: file
     file: https://brands.home-assistant.io/music_assistant/icon@2x.png
     id: ma_logo_small
-    resize: 32x32
+    resize: 20x20
     type: RGB565
     transparency: alpha_channel
   - platform: sendspin
