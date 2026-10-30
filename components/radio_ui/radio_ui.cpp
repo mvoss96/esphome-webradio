@@ -1,5 +1,6 @@
 #include "radio_ui.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -16,21 +17,6 @@ static void mark_playing(const Slot &s, bool playing) {
   lv_obj_set_style_border_color(s.logo_box, col(ACCENT), 0);
   lv_obj_set_style_border_opa(s.logo_box, LV_OPA_COVER, 0);
   lv_obj_set_style_border_post(s.logo_box, true, 0);
-}
-
-void style_gauge(lv_obj_t *arc, int width) {
-  lv_arc_set_rotation(arc, 135);
-  lv_arc_set_bg_angles(arc, 0, 270);
-  lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_set_style_pad_all(arc, 0, LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
-  lv_obj_set_style_border_width(arc, 0, LV_PART_MAIN);
-  lv_obj_set_style_arc_width(arc, width, LV_PART_MAIN);
-  lv_obj_set_style_arc_width(arc, width, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(arc, col(TRACK), LV_PART_MAIN);
-  lv_obj_set_style_arc_color(arc, col(TEXT), LV_PART_INDICATOR);
-  lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_KNOB);
-  lv_obj_set_style_pad_all(arc, 0, LV_PART_KNOB);
 }
 
 const lv_font_t *fit_font(const char *text, const lv_font_t *const *fonts, int count, int max_width) {
@@ -67,11 +53,11 @@ std::string dim_text(float seconds) {
   const int s = (int) std::lround(seconds);
   if (s <= 0)
     return "Aus";
-  char buf[12];
+  char buf[20];
   if (s >= 60 && s % 60 == 0)
-    snprintf(buf, sizeof(buf), "%dm", s / 60);
+    snprintf(buf, sizeof(buf), "%d min", s / 60);
   else
-    snprintf(buf, sizeof(buf), "%ds", s);
+    snprintf(buf, sizeof(buf), "%d s", s);
   return buf;
 }
 
@@ -84,8 +70,7 @@ static void render_slot(const Slot &s, int slot, const Item *it, bool center, bo
   show(s.root);
   hide(s.logo_box);
   hide(s.icon);
-  hide(s.arc);
-  hide(s.arc_lbl);
+  hide(s.value_lbl);
   // No whole-object opacity here: it would make LVGL allocate a layer buffer on every
   // redraw. Side logos come pre-dimmed from station_logos, side icons use the dim grey.
   switch (it->kind) {
@@ -125,15 +110,17 @@ static void render_slot(const Slot &s, int slot, const Item *it, bool center, bo
       lv_obj_set_style_text_color(s.icon, col(c), 0);
       break;
     }
-    case Item::GAUGE: {
-      show(s.arc);
-      show(s.arc_lbl);
-      lv_arc_set_range(s.arc, (int) std::lround(it->lo * 2), (int) std::lround(it->hi * 2));
-      lv_arc_set_value(s.arc, (int) std::lround(it->value * 2));
-      uint32_t c = editing ? ACCENT : (center ? TEXT : DIM);
-      lv_obj_set_style_arc_color(s.arc, col(c), LV_PART_INDICATOR);
-      lv_label_set_text(s.arc_lbl, it->value_text.empty() ? gain_text(it->value).c_str() : it->value_text.c_str());
-      lv_obj_set_style_text_color(s.arc_lbl, col(c), 0);
+    case Item::STEPS: {
+      // An icon tile like the others; while editing, the value replaces the icon.
+      if (center && editing) {
+        show(s.value_lbl);
+        lv_label_set_text(s.value_lbl, it->value_text.c_str());
+        lv_obj_set_style_text_color(s.value_lbl, col(ACCENT), 0);
+      } else {
+        show(s.icon);
+        lv_label_set_text(s.icon, it->icon);
+        lv_obj_set_style_text_color(s.icon, col(center ? TEXT : DIM), 0);
+      }
       break;
     }
   }
@@ -169,6 +156,21 @@ void render(const Carousel &c, const std::vector<Item> &items, int sel, bool edi
     show(c.sub);
     lv_label_set_text(c.sub, cur.sub.c_str());
     lv_obj_set_style_text_color(c.sub, col(editing ? ACCENT : SUB), 0);
+  }
+
+  // Step dots below the value while a STEPS item is edited; the current step is larger.
+  for (int k = 0; k < DIM_STEP_COUNT; k++) {
+    if (!editing || cur.kind != Item::STEPS || k >= cur.step_count) {
+      hide(c.steps[k]);
+      continue;
+    }
+    const bool on = k == cur.step;
+    const int r = on ? 3 : 2;
+    const int x = 30 + 100 * k / std::max(1, cur.step_count - 1);
+    show(c.steps[k]);
+    lv_obj_set_size(c.steps[k], 2 * r, 2 * r);
+    lv_obj_set_pos(c.steps[k], x - r, 72 - r);
+    lv_obj_set_style_bg_color(c.steps[k], col(on ? ACCENT : DIM), 0);
   }
 }
 

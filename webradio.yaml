@@ -25,10 +25,6 @@ esphome:
           id(speaker_eq).set_band_gain(1, -id(eq_bass).state);
           id(speaker_eq).set_band_gain(2, id(eq_mid).state);
           id(speaker_eq).set_band_gain(3, id(eq_treble).state);
-      - lambda: |-
-          esphome::radio_ui::style_gauge(id(c_arc), 3);
-          esphome::radio_ui::style_gauge(id(l_arc), 2);
-          esphome::radio_ui::style_gauge(id(r_arc), 2);
       - script.execute: load_stations
       - script.execute: refresh_volume
 
@@ -856,7 +852,7 @@ script:
       - lvgl.page.show: now_playing_page
       - script.execute: display_wake
 
-  # Radio: station logo, name, "Live". Sendspin: cover, title, artist.
+  # Radio: station logo and name. Sendspin: cover, title, artist.
   - id: update_playing_layout
     then:
       - lambda: |-
@@ -874,12 +870,11 @@ script:
             const int idx = id(station_index);
             if (idx < 0 || idx >= (int) names.size()) return;
             name = names[idx];
-            sub = "Live";
             lv_label_set_text(id(lbl_source), "Radio");
             lv_obj_remove_flag(id(radio_logo_box), LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(id(cover_box), LV_OBJ_FLAG_HIDDEN);
             esphome::station_logos::show_logo(id(radio_logo_box), id(radio_logo_img), id(radio_logo_lbl),
-                                              id(logos)->get(3, idx, 56, false), name);
+                                              id(logos)->get(3, idx, 74, false), name);
           } else {
             name = clean(id(sendspin_title).state);
             sub = clean(id(sendspin_artist).state);
@@ -890,6 +885,8 @@ script:
           lv_label_set_text(id(lbl_now_name), name.c_str());
           lv_obj_set_style_text_font(id(lbl_now_name), fit_font(name.c_str(), fonts, 3, 148), 0);
           lv_label_set_text(id(lbl_now_sub), sub.c_str());
+          // Without a second line the name moves down to the middle of the text area.
+          lv_obj_set_y(id(lbl_now_name), sub.empty() ? 7 : 2);
 
   # Back to the playing screen when something plays, else to the clock.
   - id: go_home
@@ -956,16 +953,6 @@ script:
             i.sub = sub;
             return i;
           };
-          auto gauge = [](const std::string &label, float v, float lo, float hi, const std::string &sub) {
-            Item i;
-            i.kind = Item::GAUGE;
-            i.label = label;
-            i.value = v;
-            i.lo = lo;
-            i.hi = hi;
-            i.sub = sub;
-            return i;
-          };
           const auto &names = id(station_names);
           const int sel = id(menu_sel);
           const bool edit = id(menu_edit);
@@ -992,9 +979,12 @@ script:
             }
           } else {
             items.push_back(icon(ICON_TUNE, "Equalizer", ""));
-            Item dim = gauge("Abdunkeln nach", dim_step(id(dim_after).state), 0, DIM_STEP_COUNT - 1,
-                             edit && sel == 1 ? "Drehen zum Ändern" : "");
+            Item dim = icon(ICON_DIM, "Abdunkeln nach", "");
+            dim.kind = Item::STEPS;
+            dim.step = dim_step(id(dim_after).state);
+            dim.step_count = DIM_STEP_COUNT;
             dim.value_text = dim_text(id(dim_after).state);
+            dim.sub = edit && sel == 1 ? "" : dim.value_text;
             items.push_back(dim);
             items.push_back(icon(ICON_INFO, "Info", ""));
           }
@@ -1003,9 +993,11 @@ script:
           c.sub = id(c_sub);
           c.chev_left = id(c_chev_l);
           c.chev_right = id(c_chev_r);
-          c.center = {id(c_root), id(c_logo), id(c_img), id(c_ini), id(c_icon), id(c_arc), id(c_arc_lbl)};
-          c.left = {id(l_root), id(l_logo), id(l_img), id(l_ini), id(l_icon), id(l_arc), id(l_arc_lbl)};
-          c.right = {id(r_root), id(r_logo), id(r_img), id(r_ini), id(r_icon), id(r_arc), id(r_arc_lbl)};
+          c.center = {id(c_root), id(c_logo), id(c_img), id(c_ini), id(c_icon), id(c_value)};
+          c.left = {id(l_root), id(l_logo), id(l_img), id(l_ini), id(l_icon), id(l_value)};
+          c.right = {id(r_root), id(r_logo), id(r_img), id(r_ini), id(r_icon), id(r_value)};
+          lv_obj_t *steps[DIM_STEP_COUNT] = {id(step0), id(step1), id(step2), id(step3), id(step4), id(step5), id(step6)};
+          for (int k = 0; k < DIM_STEP_COUNT; k++) c.steps[k] = steps[k];
           c.name_fonts[0] = id(f16m)->get_lv_font();
           c.name_fonts[1] = id(f13m)->get_lv_font();
           c.name_fonts[2] = id(f12m)->get_lv_font();
@@ -1383,12 +1375,12 @@ script:
           char buf[8];
           snprintf(buf, sizeof(buf), "%d", pct);
           const lv_font_t *font = muted ? id(f16m)->get_lv_font() : id(f20m)->get_lv_font();
-          for (lv_obj_t *num : {id(lbl_vol_pct), id(lbl_clock_vol)}) {
-            lv_label_set_text(num, muted ? "Stumm" : buf);
-            lv_obj_set_style_text_font(num, font, 0);
-            lv_obj_set_style_text_color(num, lv_color_hex(muted ? SUB : TEXT), 0);
-            lv_obj_set_y(num, muted ? 2 : 0);  // same centre line for 16 and 20 px
-          }
+          lv_label_set_text(id(lbl_clock_vol), muted ? "Stumm" : buf);
+          lv_obj_set_style_text_font(id(lbl_clock_vol), font, 0);
+          lv_obj_set_style_text_color(id(lbl_clock_vol), lv_color_hex(muted ? SUB : TEXT), 0);
+          lv_obj_set_y(id(lbl_clock_vol), muted ? 2 : 0);  // same centre line for 16 and 20 px
+          lv_label_set_text(id(lbl_vol_pct), muted ? "Stumm" : buf);
+          lv_obj_set_style_text_color(id(lbl_vol_pct), lv_color_hex(muted ? SUB : TEXT), 0);
           for (lv_obj_t *bar : {id(bar_vol), id(bar_clock_vol)})
             lv_bar_set_value(bar, pct, LV_ANIM_OFF);
 
@@ -1451,7 +1443,7 @@ image:
     id: sendspin_cover_slot
     format: JPEG
     type: RGB565
-    resize: 56x56
+    resize: 74x74
     source: ALBUM
     current_image:
       id: sendspin_cover_art
@@ -1478,15 +1470,15 @@ font:
   - {file: "gfonts://Montserrat@500", id: f13m, size: 13, bpp: 4, glyphsets: [GF_Latin_Core]}
   - {file: "gfonts://Montserrat@500", id: f16m, size: 16, bpp: 4, glyphsets: [GF_Latin_Core]}
   - {file: "gfonts://Montserrat@500", id: f20m, size: 20, bpp: 4, glyphs: "0123456789"}
-  - {file: "gfonts://Montserrat@500", id: f17m, size: 17, bpp: 4, glyphs: "+-.0123456789Ausm"}
+  - {file: "gfonts://Montserrat@500", id: f24m, size: 24, bpp: 4, glyphs: " 0123456789Ausimn"}
   - {file: "gfonts://Montserrat", id: f44r, size: 44, bpp: 4, glyphs: "0123456789:-"}
 
   # Tabler line icons: volume, mute, chevrons, back, tune, info, radio,
   # settings, music, pause.
   - {file: {type: web, url: '${tabler_font}'}, id: ti16, size: 16, bpp: 4, glyphs: ["", ""]}
-  # Carousel icons: settings, cast, equalizer, info.
-  - {file: {type: web, url: '${tabler_font}'}, id: ti24, size: 24, bpp: 4, glyphs: ["", "", "", ""]}
-  - {file: {type: web, url: '${tabler_font}'}, id: ti40, size: 40, bpp: 4, glyphs: ["", "", "", ""]}
+  # Carousel icons: settings, cast, equalizer, info, dim.
+  - {file: {type: web, url: '${tabler_font}'}, id: ti24, size: 24, bpp: 4, glyphs: ["", "", "", "", ""]}
+  - {file: {type: web, url: '${tabler_font}'}, id: ti40, size: 40, bpp: 4, glyphs: ["", "", "", "", ""]}
   - {file: {type: web, url: '${tabler_font}'}, id: ti22, size: 22, bpp: 4, glyphs: [""]}
   # Cover placeholder on the playing screen.
   - {file: {type: web, url: '${tabler_font}'}, id: ti34, size: 34, bpp: 4, glyphs: [""]}
@@ -1572,22 +1564,22 @@ lvgl:
         - obj:
             id: radio_logo_box
             styles: logo_box
-            x: 52
-            y: 20
-            width: 56
-            height: 56
-            radius: 12
+            x: 43
+            y: 18
+            width: 74
+            height: 74
+            radius: 15
             widgets:
               - image: {id: radio_logo_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
-              - label: {id: radio_logo_lbl, text: "", align: CENTER, text_font: f13m, text_color: 0xC4C4CC}
+              - label: {id: radio_logo_lbl, text: "", align: CENTER, text_font: f16m, text_color: 0xC4C4CC}
         - obj:
             id: cover_box
             styles: logo_box
-            x: 52
-            y: 20
-            width: 56
-            height: 56
-            radius: 10
+            x: 43
+            y: 18
+            width: 74
+            height: 74
+            radius: 13
             hidden: true
             widgets:
               - label: {id: cover_placeholder, text: "", align: CENTER, text_font: ti34, text_color: 0x787880}
@@ -1596,8 +1588,8 @@ lvgl:
                   id: pause_overlay
                   x: 0
                   y: 0
-                  width: 56
-                  height: 56
+                  width: 74
+                  height: 74
                   bg_color: 0x000000
                   bg_opa: 55%
                   border_width: 0
@@ -1610,27 +1602,26 @@ lvgl:
             id: now_text
             styles: plain
             x: 0
-            y: 80
+            y: 92
             width: 160
-            height: 44
+            height: 36
             widgets:
               - label: {id: lbl_now_name, text: "", height: 20, x: 6, y: 2, width: 148, long_mode: DOT, text_align: CENTER, text_font: f16m, text_color: 0xFFFFFF}
-              - label: {id: lbl_now_sub, text: "", height: 15, x: 6, y: 25, width: 148, long_mode: DOT, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
+              - label: {id: lbl_now_sub, text: "", height: 15, x: 6, y: 21, width: 148, long_mode: DOT, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
         - obj:
             id: now_vol
             styles: plain
             x: 0
-            y: 80
+            y: 92
             width: 160
-            height: 34
+            height: 36
             hidden: true
             widgets:
-              - label: {id: lbl_vol_pct, text: "", x: 0, y: 0, width: 160, text_align: CENTER, text_font: f20m, text_color: 0xFFFFFF}
               - bar:
                   id: bar_vol
-                  x: 20
-                  y: 28
-                  width: 120
+                  x: 22
+                  y: 11
+                  width: 86
                   height: 6
                   min_value: 0
                   max_value: 100
@@ -1641,6 +1632,7 @@ lvgl:
                   indicator:
                     bg_color: 0xFFB020
                     radius: 3
+              - label: {id: lbl_vol_pct, text: "", x: 112, y: 5, width: 44, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
 
     # 2: Carousel for all menus, filled by render_menu / radio_ui::render.
     - id: carousel_page
@@ -1668,8 +1660,7 @@ lvgl:
                     - image: {id: c_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
                     - label: {id: c_ini, text: "", align: CENTER, text_font: f16m, text_color: 0xC4C4CC}
               - label: {id: c_icon, text: "", align: CENTER, text_font: ti40, text_color: 0xFFFFFF, hidden: true}
-              - arc: {id: c_arc, align: CENTER, width: 60, height: 60, min_value: 0, max_value: 18, value: 0, hidden: true}
-              - label: {id: c_arc_lbl, text: "", align: CENTER, text_font: f17m, text_color: 0xFFFFFF, hidden: true}
+              - label: {id: c_value, text: "", align: CENTER, y: -4, text_font: f24m, text_color: 0xFFB020, hidden: true}
         - obj:
             id: l_root
             styles: plain
@@ -1692,8 +1683,7 @@ lvgl:
                     - image: {id: l_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
                     - label: {id: l_ini, text: "", align: CENTER, text_font: f10m, text_color: 0xC4C4CC}
               - label: {id: l_icon, text: "", align: CENTER, text_font: ti24, text_color: 0xFFFFFF, hidden: true}
-              - arc: {id: l_arc, align: CENTER, width: 35, height: 35, min_value: 0, max_value: 18, value: 0, hidden: true}
-              - label: {id: l_arc_lbl, text: "", align: CENTER, text_font: f10m, text_color: 0xFFFFFF, hidden: true}
+              - label: {id: l_value, text: "", align: CENTER, text_font: f10m, text_color: 0xFFFFFF, hidden: true}
         - obj:
             id: r_root
             styles: plain
@@ -1716,12 +1706,18 @@ lvgl:
                     - image: {id: r_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
                     - label: {id: r_ini, text: "", align: CENTER, text_font: f10m, text_color: 0xC4C4CC}
               - label: {id: r_icon, text: "", align: CENTER, text_font: ti24, text_color: 0xFFFFFF, hidden: true}
-              - arc: {id: r_arc, align: CENTER, width: 35, height: 35, min_value: 0, max_value: 18, value: 0, hidden: true}
-              - label: {id: r_arc_lbl, text: "", align: CENTER, text_font: f10m, text_color: 0xFFFFFF, hidden: true}
-        - label: {id: c_chev_l, text: "", x: 24, y: 42, text_font: ti16, text_color: 0xC4C4CC, hidden: true}
-        - label: {id: c_chev_r, text: "", x: 120, y: 42, text_font: ti16, text_color: 0xC4C4CC, hidden: true}
+              - label: {id: r_value, text: "", align: CENTER, text_font: f10m, text_color: 0xFFFFFF, hidden: true}
+        - label: {id: c_chev_l, text: "", x: 16, y: 42, text_font: ti16, text_color: 0xC4C4CC, hidden: true}
+        - label: {id: c_chev_r, text: "", x: 128, y: 42, text_font: ti16, text_color: 0xC4C4CC, hidden: true}
         - label: {id: c_name, text: "", height: 19, x: 6, y: 95, width: 148, long_mode: DOT, text_align: CENTER, text_font: f16m, text_color: 0xFFFFFF}
         - label: {id: c_sub, text: "", height: 15, x: 6, y: 112, width: 148, long_mode: DOT, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
+        - obj: {id: step0, x: 0, y: 0, width: 4, height: 4, radius: 3, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+        - obj: {id: step1, x: 0, y: 0, width: 4, height: 4, radius: 3, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+        - obj: {id: step2, x: 0, y: 0, width: 4, height: 4, radius: 3, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+        - obj: {id: step3, x: 0, y: 0, width: 4, height: 4, radius: 3, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+        - obj: {id: step4, x: 0, y: 0, width: 4, height: 4, radius: 3, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+        - obj: {id: step5, x: 0, y: 0, width: 4, height: 4, radius: 3, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+        - obj: {id: step6, x: 0, y: 0, width: 4, height: 4, radius: 3, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
 
     # 3: Info, all values on one page. Click or hold returns to the menu.
     - id: info_page
