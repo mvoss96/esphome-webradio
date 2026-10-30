@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.9.2-airplay"
+    version: "1.9.3-airplay"
   on_boot:
     priority: -100
     then:
@@ -167,6 +167,12 @@ globals:
 
   # AirPlay plays (set by check_source); radio_active is false then.
   - id: airplay_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  # The AirPlay sender has sent a cover for the current track.
+  - id: airplay_has_cover
     type: bool
     restore_value: false
     initial_value: 'false'
@@ -909,11 +915,18 @@ script:
             lv_obj_add_flag(id(radio_logo_box), LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(id(cover_box), LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(id(cover_art), LV_OBJ_FLAG_HIDDEN);
-            lv_obj_remove_flag(id(cover_placeholder), LV_OBJ_FLAG_HIDDEN);
+            if (id(airplay_has_cover)) {
+              lv_obj_remove_flag(id(airplay_art), LV_OBJ_FLAG_HIDDEN);
+              lv_obj_add_flag(id(cover_placeholder), LV_OBJ_FLAG_HIDDEN);
+            } else {
+              lv_obj_add_flag(id(airplay_art), LV_OBJ_FLAG_HIDDEN);
+              lv_obj_remove_flag(id(cover_placeholder), LV_OBJ_FLAG_HIDDEN);
+            }
           } else {
             name = clean(id(sendspin_title).state);
             sub = clean(id(sendspin_artist).state);
             lv_label_set_text(id(lbl_source), "Sendspin");
+            lv_obj_add_flag(id(airplay_art), LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(id(radio_logo_box), LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(id(cover_box), LV_OBJ_FLAG_HIDDEN);
           }
@@ -1554,6 +1567,25 @@ image:
       - lvgl.widget.hide: cover_art
       - lvgl.widget.show: cover_placeholder
 
+  # Cover from the AirPlay sender; shown by update_playing_layout while AirPlay plays.
+  - platform: airplay
+    id: airplay_cover
+    airplay_id: airplay_source
+    type: RGB565
+    resize: 56x56
+    max_size: 300kB
+    on_image_update:
+      - lambda: "id(airplay_has_cover) = true;"
+      - lvgl.image.update:
+          id: airplay_art
+          src: airplay_cover
+      - script.execute: update_playing_layout
+    on_image_clear:
+      - lambda: "id(airplay_has_cover) = false;"
+      - script.execute: update_playing_layout
+    on_image_error:
+      - logger.log: "AirPlay cover could not be decoded"
+
 # Montserrat with Latin glyphs (umlauts). Medium weight, because thin strokes
 # vanish on the TN panel at an angle.
 font:
@@ -1676,6 +1708,7 @@ lvgl:
             widgets:
               - label: {id: cover_placeholder, text: "", align: CENTER, text_font: ti34, text_color: 0x787880}
               - image: {id: cover_art, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
+              - image: {id: airplay_art, src: airplay_cover, align: CENTER, hidden: true}
               - obj:
                   id: pause_overlay
                   x: 0
