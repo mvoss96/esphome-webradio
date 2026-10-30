@@ -110,3 +110,8 @@ whether Home Assistant is connected. Actions:
 The module has only 2 MB PSRAM. `psram: ignore_not_found` must stay at its default; with `false`
 ESPHome enables network buffers sized for 8 MB modules and allocations start failing while streaming.
 The Sendspin buffer is limited to 300 kB for the same reason.
+
+The flash holds two 3 MB app partitions for OTA, the settings (NVS) and a 1.5 MB `logos` partition
+for station logos. Changing the partition table needs one flash over USB; it moves the NVS
+partition, so the station list and settings are reset. Save the list beforehand with
+`GET /api/stations` and restore it with `POST /api/stations`.
