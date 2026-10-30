@@ -58,6 +58,9 @@ Per-device settings go under `substitutions:` in the device file:
 | Clock | Volume | Play the last station | – |
 | Now playing | Volume | Station list (Music Assistant: pause) | Stop |
 | Menus | Move | Select / edit | Back |
+| Equalizer | Select band / change it | Edit on/off | Back |
+
+The equalizer page (settings menu → Equalizer) shows bass, mid and treble as sliders.
 
 While the display is dimmed, the first input only wakes it. The dim time is a setting in the
 settings menu (and the Home Assistant entity "Display abdunkeln nach"); 0 turns dimming off.
@@ -65,6 +68,7 @@ settings menu (and the Home Assistant entity "Display abdunkeln nach"); 0 turns 
 ## Web page
 
 `http://<radio>/` shows the playing station, a stop/play button, the volume and a tile per station.
+"Einstellungen" (`/#einstellungen`) sets bass, mid, treble and the dim time.
 "Sender verwalten" (`/#sender`) edits the list: search radio-browser.info, add, rename, drag to sort,
 remove, then "Aufs Radio übertragen". Search and logos are loaded by the browser, not by the radio.
 
@@ -72,12 +76,13 @@ API used by the page:
 
 | Request | Body / response |
 |---------|-----------------|
-| `GET /api/status` | JSON: `station`, `playing`, `ma`, `volume`, `muted`, `ha` |
+| `GET /api/status` | JSON: `station`, `playing`, `ma`, `volume`, `muted`, `ha`, `bass`, `mid`, `treble`, `dim` |
 | `GET /api/stations` | one `name<TAB>stream-url<TAB>logo-url` line per station |
 | `POST /api/stations` | same text format; replaces the list |
 | `POST /api/play` | station index |
 | `POST /api/volume` | 0–100 |
 | `POST /api/stop` | – |
+| `POST /api/setting` | `key=value` lines; keys `bass`, `mid`, `treble` (dB), `dim` (seconds) |
 
 ## Home Assistant
 

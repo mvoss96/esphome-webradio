@@ -82,6 +82,20 @@
   .own { margin-top: 14px; color: var(--sub); font-size: 14px; }
   .own button { color: var(--sub); text-decoration: underline; text-underline-offset: 3px; }
 
+  /* Settings view */
+  .links { display: flex; gap: 18px; flex-wrap: wrap; justify-content: flex-end; }
+  .card { background: var(--row); border: 1px solid var(--line); border-radius: 12px; padding: 4px 16px; margin-bottom: 26px; }
+  .setting { display: grid; grid-template-columns: 110px 1fr 64px; align-items: center; gap: 14px; padding: 12px 0;
+             border-top: 1px solid var(--line); }
+  .setting:first-child { border-top: 0; }
+  .setting label { color: var(--sub); }
+  .setting input { width: 100%; accent-color: var(--accent); }
+  .setting .value { text-align: right; font-variant-numeric: tabular-nums; }
+  .setting select { justify-self: start; background: var(--bg); color: var(--text); border: 1px solid var(--line);
+                    border-radius: 8px; padding: 6px 10px; font: inherit; }
+  .reset { margin: 0 0 12px; }
+  .reset button { color: var(--sub); text-decoration: underline; text-underline-offset: 3px; font-size: 14px; }
+
   @media (max-width: 560px) {
     main { padding: 18px 14px 40px; }
     .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -89,6 +103,8 @@
     #manage header { flex-direction: column; align-items: stretch; gap: 14px; }
     .save { justify-content: space-between; }
     .item { gap: 10px; padding: 9px 10px; }
+    .setting { grid-template-columns: 80px 1fr 56px; gap: 10px; }
+    .card { padding: 4px 12px; }
   }
 </style>
 </head>
@@ -97,7 +113,7 @@
   <section id="control">
     <header>
       <div><h1>Web Radio</h1><div class="ha" id="ha"></div></div>
-      <a href="#sender">Sender verwalten ›</a>
+      <div class="links"><a href="#einstellungen">Einstellungen ›</a><a href="#sender">Sender verwalten ›</a></div>
     </header>
     <div class="now">
       <div id="now-logo"></div>
@@ -111,6 +127,25 @@
     </div>
     <div class="section">Sender</div>
     <ul class="grid" id="grid"></ul>
+  </section>
+
+  <section id="settings" hidden>
+    <a class="back" href="#">‹ Steuerung</a>
+    <header><h1>Einstellungen</h1></header>
+    <div class="section">Klang</div>
+    <div class="card">
+      <div id="eq"></div>
+      <div class="reset"><button id="reset">Auf Standard zurücksetzen</button></div>
+    </div>
+    <div class="section">Display</div>
+    <div class="card">
+      <div class="setting"><label for="dim">Abdunkeln nach</label>
+        <select id="dim">
+          <option value="0">Aus</option><option value="10">10 s</option><option value="15">15 s</option>
+          <option value="30">30 s</option><option value="60">1 min</option><option value="120">2 min</option>
+          <option value="300">5 min</option>
+        </select><span></span></div>
+    </div>
   </section>
 
   <section id="manage" hidden>
@@ -148,7 +183,8 @@ const ICON = {
 };
 
 let stations = [];     // {name, url, logo}
-let status = {station: 0, playing: false, ma: false, volume: 0, muted: false, ha: false};
+let status = {station: 0, playing: false, ma: false, volume: 0, muted: false, ha: false,
+              bass: 6, mid: 0, treble: 0, dim: 15};
 let dirty = false;     // unsaved changes in the manage view
 let found = [];        // last search results
 let volumeBusy = 0;    // time of the last slider movement
@@ -180,6 +216,7 @@ async function poll() {
   try {
     status = await (await fetch('/api/status')).json();
     renderControl();
+    renderSettings();
   } catch { $('now-info').textContent = 'Radio nicht erreichbar'; }
 }
 
@@ -372,22 +409,67 @@ $('own').onclick = () => {
   if (name) { stations.push({name, url, logo: ''}); changed(); }
 };
 
+// ---------- Settings view ----------
+
+// Equalizer bands: status/setting key, label, range in dB. Defaults match webradio.yaml.
+const EQ = [['bass', 'Bass', 0, 9], ['mid', 'Mitten', -12, 6], ['treble', 'Höhen', -12, 6]];
+const EQ_DEFAULT = {bass: 6, mid: 0, treble: 0};
+const gain = v => `${v > 0 ? '+' : ''}${v} dB`;
+$('eq').innerHTML = EQ.map(([key, label, min, max]) => `<div class="setting"><label for="eq-${key}">${label}</label>
+  <input type="range" id="eq-${key}" min="${min}" max="${max}" step="0.5"><span class="value" id="eq-${key}-value"></span></div>`).join('');
+
+// Changed values, sent together at most every 200 ms; while a slider moves, polls do not overwrite it.
+let pending = {}, settingTimer, settingBusy = 0;
+function sendSetting(key, value) {
+  pending[key] = value;
+  settingBusy = Date.now();
+  if (!settingTimer) settingTimer = setTimeout(() => {
+    post('/api/setting', Object.entries(pending).map(([k, v]) => `${k}=${v}`).join('\n'));
+    pending = {};
+    settingTimer = null;
+  }, 200);
+}
+
+function renderSettings() {
+  if (Date.now() - settingBusy < 1500) return;
+  for (const [key] of EQ) {
+    $(`eq-${key}`).value = status[key];
+    $(`eq-${key}-value`).textContent = gain(status[key]);
+  }
+  $('dim').value = String(status.dim);
+}
+
+for (const [key] of EQ) {
+  $(`eq-${key}`).oninput = e => {
+    $(`eq-${key}-value`).textContent = gain(+e.target.value);
+    sendSetting(key, e.target.value);
+  };
+}
+$('dim').onchange = e => sendSetting('dim', e.target.value);
+$('reset').onclick = () => {
+  Object.assign(status, EQ_DEFAULT);
+  for (const [key, value] of Object.entries(EQ_DEFAULT)) sendSetting(key, value);
+  settingBusy = 0;
+  renderSettings();
+};
+
 // ---------- Views ----------
 
 function showView() {
-  const manage = location.hash === '#sender';
+  const manage = location.hash === '#sender', settings = location.hash === '#einstellungen';
   if (!manage && dirty) {
     if (!confirm('Nicht übertragene Änderungen verwerfen?')) { location.hash = '#sender'; return; }
     loadStations();
   }
   $('manage').hidden = !manage;
-  $('control').hidden = manage;
+  $('settings').hidden = !settings;
+  $('control').hidden = manage || settings;
   if (!manage) poll();
 }
 
 window.onhashchange = showView;
 window.onbeforeunload = () => dirty ? true : undefined;
-setInterval(() => { if (!$('control').hidden && !document.hidden) poll(); }, 3000);
+setInterval(() => { if ($('manage').hidden && !document.hidden) poll(); }, 3000);
 loadStations().then(showView).catch(() => { $('now-info').textContent = 'Radio nicht erreichbar'; });
 </script>
 </body>

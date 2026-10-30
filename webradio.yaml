@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.7.7"
+    version: "1.8.0"
   on_boot:
     priority: -100
     then:
@@ -69,12 +69,15 @@ radio_web:
     return out;
   status: !lambda |-
     auto *player = id(media_player_sendspin);
-    char buf[128];
-    snprintf(buf, sizeof(buf), "{\"station\":%d,\"playing\":%s,\"ma\":%s,\"volume\":%d,\"muted\":%s,\"ha\":%s}",
+    char buf[224];
+    snprintf(buf, sizeof(buf),
+             "{\"station\":%d,\"playing\":%s,\"ma\":%s,\"volume\":%d,\"muted\":%s,\"ha\":%s,"
+             "\"bass\":%.1f,\"mid\":%.1f,\"treble\":%.1f,\"dim\":%d}",
              id(station_index), id(radio_active) && id(is_now_playing) ? "true" : "false",
              !id(radio_active) && id(is_now_playing) ? "true" : "false",
              (int) lroundf(player->volume * 100), player->is_muted() ? "true" : "false",
-             esphome::api::global_api_server->is_connected() ? "true" : "false");
+             esphome::api::global_api_server->is_connected() ? "true" : "false",
+             id(eq_bass).state, id(eq_mid).state, id(eq_treble).state, (int) id(dim_after).state);
     return std::string(buf);
   on_save:
     - script.execute:
@@ -90,6 +93,21 @@ radio_web:
         volume: !lambda "return clamp(volume, 0, 100) / 100.0f;"
   on_stop:
     - media_player.stop: media_player_sendspin
+  # Settings from the web page: bass, mid, treble (dB) and dim (seconds).
+  on_setting:
+    - lambda: |-
+        esphome::number::Number *num = nullptr;
+        if (key == "bass") num = id(eq_bass);
+        else if (key == "mid") num = id(eq_mid);
+        else if (key == "treble") num = id(eq_treble);
+        else if (key == "dim") num = id(dim_after);
+        if (num == nullptr) {
+          ESP_LOGW("radio_web", "Unknown setting '%s'", key.c_str());
+          return;
+        }
+        auto call = num->make_call();
+        call.set_value(value);
+        call.perform();
 
 ########################################################################
 
@@ -170,6 +188,16 @@ globals:
     restore_value: false
     initial_value: '0'
   - id: menu_edit
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  # Equalizer page: selected band (0 bass, 1 mid, 2 treble) and whether turning edits it.
+  - id: eq_sel
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: eq_edit
     type: bool
     restore_value: false
     initial_value: 'false'
@@ -377,6 +405,11 @@ number:
             lambda: "return id(ui_page) == 2;"
           then:
             - script.execute: render_menu
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 4;"
+          then:
+            - script.execute: render_eq
 
   - platform: template
     name: "EQ Mid"
@@ -389,6 +422,12 @@ number:
     restore_value: true
     set_action:
       - lambda: "id(speaker_eq).set_band_gain(2, x);"
+    on_value:
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 4;"
+          then:
+            - script.execute: render_eq
 
   - platform: template
     name: "EQ Treble"
@@ -407,6 +446,11 @@ number:
             lambda: "return id(ui_page) == 2;"
           then:
             - script.execute: render_menu
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 4;"
+          then:
+            - script.execute: render_eq
 
 sendspin:
   id: sendspin_hub
@@ -898,10 +942,9 @@ script:
               title = "Einstellungen";
               const char *hint_edit = "Drehen zum Ändern", *hint = "Drücken zum Ändern";
               items.push_back(back());
-              items.push_back(gauge("Bass", id(eq_bass).state, 0, 9, edit && sel == 1 ? hint_edit : hint));
-              items.push_back(gauge("Höhen", id(eq_treble).state, -12, 6, edit && sel == 2 ? hint_edit : hint));
+              items.push_back(icon(ICON_TUNE, "Equalizer", ""));
               Item dim = gauge("Abdunkeln nach", dim_step(id(dim_after).state), 0, DIM_STEP_COUNT - 1,
-                               edit && sel == 3 ? hint_edit : hint);
+                               edit && sel == 2 ? hint_edit : hint);
               dim.value_text = dim_text(id(dim_after).state);
               items.push_back(dim);
               break;
@@ -931,7 +974,7 @@ script:
       dir: int
     then:
       - lambda: |-
-          int n = 4;  // main menu and settings
+          int n = id(menu) == 0 ? 4 : 3;  // main menu 4 tiles, settings 3
           if (id(menu) == 1) n = (int) id(station_names).size() + 1;
           id(menu_sel) = std::max(0, std::min(n - 1, id(menu_sel) + dir));
 
@@ -1021,17 +1064,108 @@ script:
                                         id: play_station
                                         idx: !lambda "return id(menu_sel) - 1;"
                                   else:
-                                    - lambda: "id(menu_edit) = !id(menu_edit);"
-                                    - script.execute: render_menu
+                                    - if:
+                                        condition:
+                                          lambda: "return id(menu_sel) == 1;"
+                                        then:
+                                          - script.execute: open_eq
+                                        else:
+                                          - lambda: "id(menu_edit) = !id(menu_edit);"
+                                          - script.execute: render_menu
 
-  # Leave menus and info after 20 s without input.
+  # Equalizer page (ui_page 4): bass, mid and treble as vertical sliders.
+  # Turn selects a band, click switches to editing (accent colour), turn changes it.
+  - id: open_eq
+    then:
+      - globals.set:
+          id: eq_edit
+          value: 'false'
+      - globals.set:
+          id: ui_page
+          value: '4'
+      - script.execute: render_eq
+      - lvgl.page.show: eq_page
+      - script.execute: menu_timeout
+
+  - id: render_eq
+    then:
+      - lambda: |-
+          using namespace esphome::radio_ui;
+          esphome::number::Number *nums[3] = {id(eq_bass), id(eq_mid), id(eq_treble)};
+          static const float LO[3] = {0, -12, -12}, HI[3] = {9, 6, 6};
+          static const char *const NAMES[3] = {"Bass", "Mitten", "Höhen"};
+          lv_obj_t *fills[3] = {id(eq_fill0), id(eq_fill1), id(eq_fill2)};
+          lv_obj_t *knobs[3] = {id(eq_knob0), id(eq_knob1), id(eq_knob2)};
+          lv_obj_t *labels[3] = {id(eq_lbl0), id(eq_lbl1), id(eq_lbl2)};
+          const int top = 24, bottom = 84;  // slider track, see eq_page
+          const int sel = id(eq_sel);
+          for (int k = 0; k < 3; k++) {
+            auto ypos = [&](float v) {
+              const float f = (std::min(std::max(v, LO[k]), HI[k]) - LO[k]) / (HI[k] - LO[k]);
+              return bottom - (int) lroundf(f * (bottom - top));
+            };
+            const int cx = 40 + 40 * k, y = ypos(nums[k]->state), zero = ypos(0);
+            const lv_color_t c = lv_color_hex(k == sel ? (id(eq_edit) ? ACCENT : TEXT) : DIM);
+            lv_obj_set_pos(fills[k], cx - 1, std::min(y, zero));
+            lv_obj_set_size(fills[k], 3, std::max(1, std::abs(y - zero)));
+            lv_obj_set_style_bg_color(fills[k], c, 0);
+            lv_obj_set_pos(knobs[k], cx - 4, y - 4);
+            lv_obj_set_style_bg_color(knobs[k], c, 0);
+            lv_obj_set_style_text_color(labels[k], lv_color_hex(k == sel ? TEXT : DIM), 0);
+          }
+          const std::string text = std::string(NAMES[sel]) + "  " + gain_text(nums[sel]->state) + " dB";
+          lv_label_set_text(id(eq_value), text.c_str());
+          lv_obj_set_style_text_color(id(eq_value), lv_color_hex(id(eq_edit) ? ACCENT : TEXT), 0);
+
+  - id: eq_turn
+    parameters:
+      dir: int
+    then:
+      - lambda: |-
+          if (id(eq_edit)) {
+            esphome::number::Number *nums[3] = {id(eq_bass), id(eq_mid), id(eq_treble)};
+            auto *num = nums[id(eq_sel)];
+            auto call = num->make_call();
+            call.set_value(num->state + 0.5f * dir);
+            call.perform();
+          } else {
+            id(eq_sel) = std::max(0, std::min(2, id(eq_sel) + dir));
+          }
+      - script.execute: render_eq
+      - script.execute: menu_timeout
+
+  - id: eq_click
+    then:
+      - lambda: "id(eq_edit) = !id(eq_edit);"
+      - script.execute: render_eq
+      - script.execute: menu_timeout
+
+  # Hold: leave editing first, then back to the settings menu.
+  - id: eq_back
+    then:
+      - if:
+          condition:
+            lambda: "return id(eq_edit);"
+          then:
+            - globals.set:
+                id: eq_edit
+                value: 'false'
+            - script.execute: render_eq
+            - script.execute: menu_timeout
+          else:
+            - script.execute:
+                id: open_menu
+                m: 2
+                s: 1
+
+  # Leave menus, info and the equalizer page after 20 s without input.
   - id: menu_timeout
     mode: restart
     then:
       - delay: 20s
       - if:
           condition:
-            lambda: "return id(ui_page) == 2 || id(ui_page) == 3;"
+            lambda: "return id(ui_page) >= 2 && id(ui_page) <= 4;"
           then:
             - script.execute: go_home
 
@@ -1062,17 +1196,10 @@ script:
                       then:
                         - lambda: |-
                             using namespace esphome::radio_ui;
-                            if (id(menu_sel) == 3) {
-                              const int k = std::max(0, std::min(DIM_STEP_COUNT - 1, dim_step(id(dim_after).state) + dir));
-                              auto call = id(dim_after).make_call();
-                              call.set_value(DIM_STEPS[k]);
-                              call.perform();
-                            } else {
-                              auto *num = id(menu_sel) == 1 ? id(eq_bass) : id(eq_treble);
-                              auto call = num->make_call();
-                              call.set_value(num->state + 0.5f * dir);
-                              call.perform();
-                            }
+                            const int k = std::max(0, std::min(DIM_STEP_COUNT - 1, dim_step(id(dim_after).state) + dir));
+                            auto call = id(dim_after).make_call();
+                            call.set_value(DIM_STEPS[k]);
+                            call.perform();
                       else:
                         - script.execute:
                             id: clamp_sel
@@ -1080,6 +1207,13 @@ script:
                   - script.execute: render_menu
                   - script.execute: menu_timeout
                 else:
+                  - if:
+                      condition:
+                        lambda: "return id(ui_page) == 4;"
+                      then:
+                        - script.execute:
+                            id: eq_turn
+                            dir: !lambda "return dir;"
                   - if:
                       condition:
                         lambda: "return id(ui_page) <= 1;"
@@ -1149,6 +1283,11 @@ script:
                                     lambda: "return id(ui_page) == 3;"
                                   then:
                                     - script.execute: menu_back
+                              - if:
+                                  condition:
+                                    lambda: "return id(ui_page) == 4;"
+                                  then:
+                                    - script.execute: eq_click
 
   # Hold: stop playback on the clock and playing screen, one level back in menus.
   - id: knob_hold
@@ -1177,6 +1316,11 @@ script:
                         lambda: "return id(ui_page) == 2 || id(ui_page) == 3;"
                       then:
                         - script.execute: menu_back
+                  - if:
+                      condition:
+                        lambda: "return id(ui_page) == 4;"
+                      then:
+                        - script.execute: eq_back
 
   ######## Display ########
 
@@ -1578,6 +1722,27 @@ lvgl:
         - label: {id: lbl_info_version, text: "", height: 15, x: 60, y: 90, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
         - label: {text: "Sender", x: 8, y: 107, text_font: f12m, text_color: 0xC4C4CC}
         - label: {id: lbl_info_count, text: "", height: 15, x: 60, y: 107, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+
+    # 4: Equalizer: bass, mid and treble, see render_eq.
+    - id: eq_page
+      styles: page_style
+      widgets:
+        - label: {text: "Equalizer", x: 0, y: 1, width: 160, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
+        - obj: {x: 39, y: 24, width: 3, height: 61, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {id: eq_fill0, x: 39, y: 84, width: 3, height: 1, radius: 1, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {id: eq_knob0, x: 36, y: 80, width: 9, height: 9, radius: 5, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - label: {id: eq_lbl0, text: "Bass", x: 20, y: 90, width: 40, text_align: CENTER, text_font: f11m, text_color: 0x787880}
+        - obj: {x: 79, y: 24, width: 3, height: 61, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {x: 75, y: 44, width: 11, height: 1, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {id: eq_fill1, x: 79, y: 84, width: 3, height: 1, radius: 1, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {id: eq_knob1, x: 76, y: 80, width: 9, height: 9, radius: 5, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - label: {id: eq_lbl1, text: "Mitten", x: 60, y: 90, width: 40, text_align: CENTER, text_font: f11m, text_color: 0x787880}
+        - obj: {x: 119, y: 24, width: 3, height: 61, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {x: 115, y: 44, width: 11, height: 1, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {id: eq_fill2, x: 119, y: 84, width: 3, height: 1, radius: 1, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {id: eq_knob2, x: 116, y: 80, width: 9, height: 9, radius: 5, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - label: {id: eq_lbl2, text: "Höhen", x: 100, y: 90, width: 40, text_align: CENTER, text_font: f11m, text_color: 0x787880}
+        - label: {id: eq_value, text: "", x: 0, y: 106, width: 160, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
 
     - id: ota_page
       styles: page_style

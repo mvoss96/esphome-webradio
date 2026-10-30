@@ -19,6 +19,7 @@ namespace esphome::radio_web {
 ///   POST /api/play      body: station index                   -> on_play
 ///   POST /api/volume    body: volume 0..100                   -> on_volume
 ///   POST /api/stop                                            -> on_stop
+///   POST /api/setting   body: "key=value" lines               -> on_setting per line
 ///
 /// Requests arrive in the web server task. The component only copies data there;
 /// lambdas and triggers run in loop(), on the main task.
@@ -36,6 +37,7 @@ class RadioWeb : public Component, public AsyncWebHandler {
   Trigger<int> *get_play_trigger() { return &this->play_trigger_; }
   Trigger<int> *get_volume_trigger() { return &this->volume_trigger_; }
   Trigger<> *get_stop_trigger() { return &this->stop_trigger_; }
+  Trigger<std::string, float> *get_setting_trigger() { return &this->setting_trigger_; }
 
   void setup() override;
   void loop() override;
@@ -47,7 +49,7 @@ class RadioWeb : public Component, public AsyncWebHandler {
 
  protected:
   /// One request from the page, carried from the web server task to loop().
-  enum Command { NONE, SAVE, PLAY, VOLUME, STOP };
+  enum Command { NONE, SAVE, PLAY, VOLUME, STOP, SETTING };
 
   web_server_base::WebServerBase *base_;
   const uint8_t *page_{nullptr};
@@ -58,6 +60,7 @@ class RadioWeb : public Component, public AsyncWebHandler {
   Trigger<int> play_trigger_;
   Trigger<int> volume_trigger_;
   Trigger<> stop_trigger_;
+  Trigger<std::string, float> setting_trigger_;
 
   std::mutex lock_;          // guards the fields below
   std::string stations_;     // copies for GET requests, refreshed in loop()

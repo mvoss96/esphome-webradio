@@ -48,6 +48,21 @@ void RadioWeb::loop() {
     case STOP:
       this->stop_trigger_.trigger();
       break;
+    case SETTING: {
+      // One "key=value" per line, so several settings arrive in one request.
+      size_t pos = 0;
+      while (pos < body.size()) {
+        size_t end = body.find('\n', pos);
+        if (end == std::string::npos)
+          end = body.size();
+        const std::string line = body.substr(pos, end - pos);
+        pos = end + 1;
+        const size_t eq = line.find('=');
+        if (eq != std::string::npos)
+          this->setting_trigger_.trigger(line.substr(0, eq), std::strtof(line.c_str() + eq + 1, nullptr));
+      }
+      break;
+    }
     case NONE:
       return;
   }
@@ -60,7 +75,8 @@ bool RadioWeb::canHandle(AsyncWebServerRequest *request) const {
   if (request->method() == HTTP_GET)
     return url == "/" || url == "/api/stations" || url == "/api/status";
   if (request->method() == HTTP_POST)
-    return url == "/api/stations" || url == "/api/play" || url == "/api/volume" || url == "/api/stop";
+    return url == "/api/stations" || url == "/api/play" || url == "/api/volume" || url == "/api/stop" ||
+           url == "/api/setting";
   return false;
 }
 
@@ -109,6 +125,8 @@ void RadioWeb::handleRequest(AsyncWebServerRequest *request) {
     command = PLAY;
   else if (url == "/api/volume")
     command = VOLUME;
+  else if (url == "/api/setting")
+    command = SETTING;
   {
     std::lock_guard<std::mutex> guard(this->lock_);
     this->command_ = command;

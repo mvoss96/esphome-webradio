@@ -19,6 +19,7 @@ CONF_ON_SAVE = "on_save"
 CONF_ON_PLAY = "on_play"
 CONF_ON_VOLUME = "on_volume"
 CONF_ON_STOP = "on_stop"
+CONF_ON_SETTING = "on_setting"
 
 radio_web_ns = cg.esphome_ns.namespace("radio_web")
 RadioWeb = radio_web_ns.class_("RadioWeb", cg.Component)
@@ -33,6 +34,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_ON_PLAY): automation.validate_automation(single=True),
         cv.Optional(CONF_ON_VOLUME): automation.validate_automation(single=True),
         cv.Optional(CONF_ON_STOP): automation.validate_automation(single=True),
+        cv.Optional(CONF_ON_SETTING): automation.validate_automation(single=True),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -61,6 +63,7 @@ async def to_code(config):
         (CONF_ON_PLAY, var.get_play_trigger(), [(cg.int_, "index")]),
         (CONF_ON_VOLUME, var.get_volume_trigger(), [(cg.int_, "volume")]),
         (CONF_ON_STOP, var.get_stop_trigger(), []),
+        (CONF_ON_SETTING, var.get_setting_trigger(), [(cg.std_string, "key"), (cg.float_, "value")]),
     ):
         if conf := config.get(key):
             await automation.build_automation(trigger, args, conf)
