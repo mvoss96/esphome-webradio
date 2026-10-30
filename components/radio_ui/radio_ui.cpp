@@ -75,7 +75,7 @@ std::string dim_text(float seconds) {
   return buf;
 }
 
-static void render_slot(const Slot &s, const Item *it, bool center, bool editing,
+static void render_slot(const Slot &s, int slot, const Item *it, bool center, bool editing,
                         station_logos::StationLogos *logos, const std::vector<std::string> &names) {
   if (it == nullptr) {
     hide(s.root);
@@ -94,7 +94,7 @@ static void render_slot(const Slot &s, const Item *it, bool center, bool editing
         return;
       show(s.logo_box);
       lv_obj_align(s.logo_lbl, LV_ALIGN_CENTER, 0, 0);
-      const lv_image_dsc_t *logo = center ? logos->big(it->station) : logos->small(it->station);
+      const lv_image_dsc_t *logo = logos->get(slot, it->station, center ? TILE_CENTER : TILE_SIDE, !center);
       station_logos::show_logo(s.logo_box, s.logo_img, s.logo_lbl, logo, names[it->station], !center);
       lv_obj_align(s.logo_img, LV_ALIGN_CENTER, 0, 0);
       lv_obj_set_style_image_opa(s.logo_img, LV_OPA_COVER, 0);
@@ -118,7 +118,7 @@ static void render_slot(const Slot &s, const Item *it, bool center, bool editing
           show(s.logo_lbl);
           lv_label_set_text(s.logo_lbl, it->letter);
           lv_obj_set_style_text_color(s.logo_lbl, col(center ? TEXT : DIM), 0);
-          lv_obj_align(s.logo_lbl, LV_ALIGN_CENTER, center ? 5 : 3, 0);
+          lv_obj_align(s.logo_lbl, LV_ALIGN_CENTER, center ? 6 : 3, 0);
         }
       }
       uint32_t c = center ? (it->kind == Item::BACK ? SUB : TEXT) : DIM;
@@ -139,7 +139,7 @@ static void render_slot(const Slot &s, const Item *it, bool center, bool editing
   }
 }
 
-void render(const Carousel &c, const char *title, const std::vector<Item> &items, int sel, bool editing,
+void render(const Carousel &c, const std::vector<Item> &items, int sel, bool editing,
             station_logos::StationLogos *logos, const std::vector<std::string> &names) {
   const int n = (int) items.size();
   if (n == 0)
@@ -150,10 +150,9 @@ void render(const Carousel &c, const char *title, const std::vector<Item> &items
     sel = n - 1;
   const Item &cur = items[sel];
 
-  lv_label_set_text(c.title, title);
-  render_slot(c.center, &cur, true, editing, logos, names);
-  render_slot(c.left, (!editing && sel > 0) ? &items[sel - 1] : nullptr, false, false, logos, names);
-  render_slot(c.right, (!editing && sel + 1 < n) ? &items[sel + 1] : nullptr, false, false, logos, names);
+  render_slot(c.center, 0, &cur, true, editing, logos, names);
+  render_slot(c.left, 1, (!editing && sel > 0) ? &items[sel - 1] : nullptr, false, false, logos, names);
+  render_slot(c.right, 2, (!editing && sel + 1 < n) ? &items[sel + 1] : nullptr, false, false, logos, names);
   if (editing) {
     show(c.chev_left);
     show(c.chev_right);
@@ -170,30 +169,6 @@ void render(const Carousel &c, const char *title, const std::vector<Item> &items
     show(c.sub);
     lv_label_set_text(c.sub, cur.sub.c_str());
     lv_obj_set_style_text_color(c.sub, col(editing ? ACCENT : SUB), 0);
-  }
-
-  // Position: dots for short rows, "k / n" for station rows longer than nine tiles.
-  const bool use_dots = n <= 9;
-  for (int i = 0; i < 9; i++) {
-    if (!use_dots || i >= n) {
-      hide(c.dots[i]);
-      continue;
-    }
-    show(c.dots[i]);
-    const int x = 80 - (n - 1) * 7 / 2 + i * 7 - 2;
-    lv_obj_set_pos(c.dots[i], x, 118);
-    lv_obj_set_style_bg_color(c.dots[i], col(i == sel ? TEXT : DIM), 0);
-  }
-  int stations = 0;
-  for (const auto &it : items)
-    stations += it.kind == Item::STATION;
-  if (!use_dots && cur.kind == Item::STATION) {
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%d / %d", cur.station + 1, stations);
-    lv_label_set_text(c.count, buf);
-    show(c.count);
-  } else {
-    hide(c.count);
   }
 }
 
