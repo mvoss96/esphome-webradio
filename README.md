@@ -56,7 +56,7 @@ Per-device settings go under `substitutions:` in the device file:
 | Screen | Turn | Click | Hold |
 |--------|------|-------|------|
 | Clock | Volume | Play the last station | – |
-| Now playing | Volume | Station list (Music Assistant: pause) | Stop |
+| Now playing | Volume | Station list | Stop |
 | Menus | Move | Select / edit | Back |
 | Equalizer | Select band / change it | Edit on/off | Back |
 
