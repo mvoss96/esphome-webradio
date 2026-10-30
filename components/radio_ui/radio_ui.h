@@ -27,6 +27,7 @@ static const char *const ICON_INFO = "";
 static const char *const ICON_RADIO = "";
 static const char *const ICON_SETTINGS = "";
 static const char *const ICON_CAST = "";
+static const char *const ICON_DIM = "";
 static const char *const ICON_WIFI = "";
 static const char *const ICON_SIGNAL = "";
 static const char *const ICON_NETWORK = "";
@@ -36,14 +37,15 @@ static const char *const ICON_MUTE = "";
 
 /// One tile of a carousel.
 struct Item {
-  enum Kind { BACK, ICON, STATION, GAUGE };
+  enum Kind { BACK, ICON, STATION, STEPS };
   Kind kind{ICON};
   const char *icon{""};
   std::string label;
   std::string sub;
   int station{-1};  // index into the station list for STATION
-  float value{0}, lo{0}, hi{1};  // GAUGE range in dB
-  std::string value_text;        // GAUGE: shown instead of the dB value when set
+  int step{0};               // STEPS: current step
+  int step_count{0};         // STEPS: number of steps
+  std::string value_text;    // STEPS: current value, shown large while editing
   bool playing{false};           // STATION / ICON: tile background with an accent border
   const char *letter{nullptr};   // ICON while playing: letter inside the screen of the cast icon
 };
@@ -55,7 +57,7 @@ static constexpr int DIM_STEP_COUNT = sizeof(DIM_STEPS) / sizeof(DIM_STEPS[0]);
 /// Index of the step closest to seconds.
 int dim_step(float seconds);
 
-/// "Aus", "15s" or "2m" for a dim time in seconds.
+/// "Aus", "15 s" or "2 min" for a dim time in seconds.
 std::string dim_text(float seconds);
 
 /// Widgets of one tile position. Only the parts matching the item kind are shown.
@@ -65,8 +67,7 @@ struct Slot {
   lv_obj_t *logo_img;
   lv_obj_t *logo_lbl;
   lv_obj_t *icon;
-  lv_obj_t *arc;
-  lv_obj_t *arc_lbl;
+  lv_obj_t *value_lbl;
 };
 
 /// All widgets of the carousel page.
@@ -76,11 +77,9 @@ struct Carousel {
   lv_obj_t *chev_left;
   lv_obj_t *chev_right;
   Slot center, left, right;
-  const lv_font_t *name_fonts[3];  // largest first
+  lv_obj_t *steps[DIM_STEP_COUNT];  // step dots below the value while editing STEPS
+  const lv_font_t *name_fonts[3];   // largest first
 };
-
-/// Style an lv_arc as a 270 degree gauge without knob.
-void style_gauge(lv_obj_t *arc, int width);
 
 /// Largest font of the list in which text fits into max_width pixels.
 const lv_font_t *fit_font(const char *text, const lv_font_t *const *fonts, int count, int max_width);

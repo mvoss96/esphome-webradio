@@ -569,10 +569,10 @@ std::vector<std::string> StationLogos::candidates_(const Job &job) {
   return urls;
 }
 
-/// Download logo_url through wsrv.nl as a 68x68 PNG and decode it to RGB565 into out.
+/// Download logo_url through wsrv.nl as a 74x74 PNG and decode it to RGB565 into out.
 bool StationLogos::fetch_(const std::string &logo_url, uint16_t *out) {
   const std::string url = "http://wsrv.nl/?url=" + url_encode(logo_url) +
-                          "&w=68&h=68&fit=contain&cbg=white&bg=white&output=png";
+                          "&w=74&h=74&fit=contain&cbg=white&bg=white&output=png";
   const size_t png_len = http_get(url, MAX_PNG);
   if (png_len == 0)
     return false;

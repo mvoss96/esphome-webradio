@@ -15,7 +15,7 @@
 
 namespace esphome::station_logos {
 
-static constexpr int STORE = 68;                // stored logo size, also the largest tile
+static constexpr int STORE = 74;                // stored logo size, the playing screen
 static constexpr int SLOT_COUNT = 4;            // logos on screen at once
 static constexpr float DIM_BRIGHTNESS = 0.6f;   // neighbour tiles are shown dimmed
 
@@ -32,7 +32,7 @@ void show_logo(lv_obj_t *box, lv_obj_t *img, lv_obj_t *label, const lv_image_dsc
 ///
 /// For each station the logo URL is either given (override) or looked up at
 /// radio-browser.info by stream URL, then by name. wsrv.nl resizes the image to a
-/// 68x68 PNG; it is decoded once and stored as RGB565 in a fixed-size flash record,
+/// 74x74 PNG; it is decoded once and stored as RGB565 in a fixed-size flash record,
 /// so it survives restarts. Only the logos on screen are kept in RAM: get() reads a
 /// record and scales it into one of SLOT_COUNT display buffers. Without the partition
 /// the records are kept in PSRAM instead.
