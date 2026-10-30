@@ -208,6 +208,17 @@ size_t EqualizerSpeaker::play(const uint8_t *data, size_t length, TickType_t tic
     return 0;
   }
 
+  // Filtered frames from the last call come first. Their input was already reported as
+  // consumed, so nothing new is taken until they are all out.
+  if (this->pending_bytes_ > 0) {
+    const uint8_t *pending = reinterpret_cast<const uint8_t *>(this->int16_scratch_.data()) + this->pending_offset_;
+    const size_t written = this->output_speaker_->play(pending, this->pending_bytes_, ticks_to_wait);
+    this->pending_offset_ += written;
+    this->pending_bytes_ -= written;
+    if (this->pending_bytes_ > 0)
+      return 0;
+  }
+
   // Fast path: bypass switch off OR no bands configured → no DSP work.
   if (!this->enabled_ || this->bands_.empty()) {
     return this->output_speaker_->play(data, length, ticks_to_wait);
@@ -228,8 +239,15 @@ size_t EqualizerSpeaker::play(const uint8_t *data, size_t length, TickType_t tic
   this->process_frames_(reinterpret_cast<const int16_t *>(data), this->int16_scratch_.data(), frame_count,
                         this->channels_);
 
-  return this->output_speaker_->play(reinterpret_cast<const uint8_t *>(this->int16_scratch_.data()),
-                                     total_samples * sizeof(int16_t), ticks_to_wait);
+  // The output may take only part of the block. The rest stays in the scratch buffer for the
+  // next call, because the caller would resend that input and filtering it a second time
+  // would break the filter state and click.
+  const size_t total_bytes = total_samples * sizeof(int16_t);
+  const size_t written = this->output_speaker_->play(reinterpret_cast<const uint8_t *>(this->int16_scratch_.data()),
+                                                     total_bytes, ticks_to_wait);
+  this->pending_offset_ = written;
+  this->pending_bytes_ = total_bytes - written;
+  return frame_count * bytes_per_frame;
 }
 
 void EqualizerSpeaker::start() {
@@ -243,6 +261,10 @@ void EqualizerSpeaker::start() {
     this->channels_ = 1;
   if (this->channels_ > 2)
     this->channels_ = 2;
+
+  // Leftover frames from a previous stream are not sent.
+  this->pending_offset_ = 0;
+  this->pending_bytes_ = 0;
 
   // Sample rate may have changed since add_band() was called → refresh.
   for (auto &band : this->bands_) {
