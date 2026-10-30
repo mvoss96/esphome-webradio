@@ -93,6 +93,7 @@ static void render_slot(const Slot &s, const Item *it, bool center, bool editing
       if (it->station < 0 || it->station >= (int) names.size())
         return;
       show(s.logo_box);
+      lv_obj_align(s.logo_lbl, LV_ALIGN_CENTER, 0, 0);
       const lv_image_dsc_t *logo = center ? logos->big(it->station) : logos->small(it->station);
       station_logos::show_logo(s.logo_box, s.logo_img, s.logo_lbl, logo, names[it->station], !center);
       lv_obj_align(s.logo_img, LV_ALIGN_CENTER, 0, 0);
@@ -112,6 +113,13 @@ static void render_slot(const Slot &s, const Item *it, bool center, bool editing
         lv_obj_set_style_bg_opa(s.logo_box, LV_OPA_COVER, 0);
         lv_obj_set_style_bg_color(s.logo_box, col(center ? 0x26262E : 0x17171C), 0);
         mark_playing(s, true);
+        if (it->letter != nullptr) {
+          // The letter sits in the screen of the cast icon, right of the centre.
+          show(s.logo_lbl);
+          lv_label_set_text(s.logo_lbl, it->letter);
+          lv_obj_set_style_text_color(s.logo_lbl, col(center ? TEXT : DIM), 0);
+          lv_obj_align(s.logo_lbl, LV_ALIGN_CENTER, center ? 5 : 3, 0);
+        }
       }
       uint32_t c = center ? (it->kind == Item::BACK ? SUB : TEXT) : DIM;
       lv_obj_set_style_text_color(s.icon, col(c), 0);

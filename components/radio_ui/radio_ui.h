@@ -22,7 +22,7 @@ static const char *const ICON_TUNE = "";
 static const char *const ICON_INFO = "";
 static const char *const ICON_RADIO = "";
 static const char *const ICON_SETTINGS = "";
-static const char *const ICON_MUSIC = "";
+static const char *const ICON_CAST = "";
 static const char *const ICON_WIFI = "";
 static const char *const ICON_SIGNAL = "";
 static const char *const ICON_NETWORK = "";
@@ -41,6 +41,7 @@ struct Item {
   float value{0}, lo{0}, hi{1};  // GAUGE range in dB
   std::string value_text;        // GAUGE: shown instead of the dB value when set
   bool playing{false};           // STATION / ICON: tile background with an accent border
+  const char *letter{nullptr};   // ICON while playing: letter inside the screen of the cast icon
 };
 
 /// Steps of the "dim after" setting in seconds; 0 = never.
