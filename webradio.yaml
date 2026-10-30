@@ -1,0 +1,1576 @@
+# ESPHome web radio: ESP32-S3, MAX98357A, ST7735 160x128, rotary encoder.
+# Use as a package next to the device's name and Wi-Fi/API settings, see example/web-radio.yaml.
+
+substitutions:
+  # Tabler icon font, pinned so the icon code points cannot change.
+  tabler_font: https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.50.0/dist/fonts/tabler-icons.ttf
+
+esphome:
+  project:
+    name: mvoss.web-radio
+    version: "1.7.0"
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          static const uint8_t silence[960] = {0};
+          id(i2s_speaker).play(silence, sizeof(silence));
+      - delay: 500ms
+      - lambda: id(i2s_speaker).stop();
+      # Restored EQ values do not run the number set_action, so apply them here.
+      - lambda: |-
+          id(speaker_eq).set_band_gain(1, -id(eq_bass).state);
+          id(speaker_eq).set_band_gain(2, id(eq_mid).state);
+          id(speaker_eq).set_band_gain(3, id(eq_treble).state);
+      - lambda: |-
+          esphome::radio_ui::style_gauge(id(c_arc), 3);
+          esphome::radio_ui::style_gauge(id(l_arc), 2);
+          esphome::radio_ui::style_gauge(id(r_arc), 2);
+      - script.execute: load_stations
+      - script.execute: refresh_volume
+
+esp32:
+  variant: ESP32S3
+  flash_size: 8MB
+  cpu_frequency: 240MHz
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://mvoss96/esphome-webradio@main
+    components: [equalizer, station_logos, radio_ui, radio_web]
+    refresh: 10s
+
+# Decoders for the radio streams. FLAC comes from the media pipeline format.
+audio:
+  codecs:
+    mp3:
+    opus:
+
+# Station logos from radio-browser.info, resized by wsrv.nl, kept in PSRAM.
+station_logos:
+  id: logos
+
+# Carousel rendering (C++ helpers, no options).
+radio_ui:
+
+# Web page at http://<radio>/: control playback, and edit the station list under #sender.
+radio_web:
+  stations: !lambda |-
+    const auto &names = id(station_names);
+    const auto &urls = id(station_urls);
+    const auto &logos = id(station_logo_urls);
+    std::string out;
+    for (size_t i = 0; i < names.size(); i++)
+      out += names[i] + "\t" + urls[i] + "\t" + (i < logos.size() ? logos[i] : "") + "\n";
+    return out;
+  status: !lambda |-
+    auto *player = id(media_player_sendspin);
+    char buf[128];
+    snprintf(buf, sizeof(buf), "{\"station\":%d,\"playing\":%s,\"ma\":%s,\"volume\":%d,\"muted\":%s,\"ha\":%s}",
+             id(station_index), id(radio_active) && id(is_now_playing) ? "true" : "false",
+             !id(radio_active) && id(is_now_playing) ? "true" : "false",
+             (int) lroundf(player->volume * 100), player->is_muted() ? "true" : "false",
+             esphome::api::global_api_server->is_connected() ? "true" : "false");
+    return std::string(buf);
+  on_save:
+    - script.execute:
+        id: store_stations
+        text: !lambda "return text;"
+  on_play:
+    - script.execute:
+        id: play_station
+        idx: !lambda "return index;"
+  on_volume:
+    - media_player.volume_set:
+        id: media_player_sendspin
+        volume: !lambda "return clamp(volume, 0, 100) / 100.0f;"
+  on_stop:
+    - media_player.stop: media_player_sendspin
+
+########################################################################
+
+# The module has only 2 MB PSRAM. ignore_not_found must stay at its default (true):
+# with false, ESPHome treats PSRAM as guaranteed and enables network buffers sized
+# for 8 MB modules (512 RX buffers, 512 KB TCP windows), which fill the PSRAM while
+# streaming and make allocations fail all over the firmware.
+psram:
+  mode: quad
+  speed: 80MHz
+
+spi:
+  clk_pin: GPIO16
+  mosi_pin: GPIO15
+
+i2s_audio:
+  id: i2s_output
+  i2s_lrclk_pin: GPIO05
+  i2s_bclk_pin: GPIO04
+
+globals:
+  - id: wifi_connected
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  - id: is_now_playing
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  - id: volume_before_mute
+    type: float
+    restore_value: true
+    initial_value: '0.5'
+
+  # Station list as "name<TAB>url<TAB>logo-url<NEWLINE>" lines, saved in flash.
+  # The logo URL is optional. 6 KB holds about 50 stations.
+  - id: station_blob
+    type: std::array<char, 6144>
+    restore_value: true
+
+  # Parsed copy of station_blob for quick access.
+  - id: station_names
+    type: std::vector<std::string>
+  - id: station_urls
+    type: std::vector<std::string>
+  - id: station_logo_urls
+    type: std::vector<std::string>
+
+  # Last played station, started by a click on the clock screen.
+  - id: station_index
+    type: int
+    restore_value: true
+    initial_value: '0'
+
+  # True while a station from the list plays, false for Music Assistant.
+  - id: radio_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  # Shown page: 0 clock, 1 playing, 2 carousel, 3 info, 5 boot, 6 OTA.
+  - id: ui_page
+    type: int
+    restore_value: false
+    initial_value: '5'
+
+  # Carousel: menu (0 main, 1 radio, 2 settings), selected tile,
+  # and whether a sound value is being edited.
+  - id: menu
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: menu_sel
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: menu_edit
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  # True while the clock is dimmed; the first knob input then only wakes it.
+  - id: display_dimmed
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+wifi:
+  on_connect:
+    - globals.set:
+        id: wifi_connected
+        value: 'true'
+    - if:
+        condition:
+          lambda: "return id(ui_page) == 5;"
+        then:
+          - script.execute: show_idle
+
+# The radio works without Home Assistant: no reboot when no API client is connected.
+api:
+  reboot_timeout: 0s
+  actions:
+    # Replace the station list from Home Assistant with three lists of equal length.
+    # logos may contain empty strings; those stations get a looked-up logo.
+    - action: set_stations
+      variables:
+        names: string[]
+        urls: string[]
+        logos: string[]
+      then:
+        - script.execute:
+            id: store_stations
+            text: !lambda |-
+              auto clean = [](std::string s) {
+                for (char &c : s)
+                  if (c == '\t' || c == '\n' || c == '\r') c = ' ';
+                return s;
+              };
+              std::string out;
+              for (size_t i = 0; i < std::min(names.size(), urls.size()); i++)
+                out += clean(names[i]) + "\t" + clean(urls[i]) + "\t" + (i < logos.size() ? clean(logos[i]) : "") + "\n";
+              return out;
+
+    # Play station number 1..n from Home Assistant.
+    - action: play_station
+      variables:
+        nummer: int
+      then:
+        - script.execute:
+            id: play_station
+            idx: !lambda "return nummer - 1;"
+
+time:
+  - platform: sntp
+    id: ha_time
+    servers:
+      - 0.pool.ntp.org
+      - 1.pool.ntp.org
+      - 2.pool.ntp.org
+    timezone: "Europe/Berlin"
+    on_time_sync:
+      - script.execute: update_time_labels
+    on_time:
+      - seconds: 0
+        then:
+          - script.execute: update_time_labels
+
+interval:
+  # The logo task cannot touch LVGL; redraw here when new logos arrived.
+  - interval: 500ms
+    then:
+      - if:
+          condition:
+            lambda: "return id(logos)->take_changed();"
+          then:
+            - script.execute: refresh_logos
+
+ota:
+  - platform: esphome
+    on_begin:
+      - media_player.stop: media_player_sendspin
+      - script.stop: vol_idle
+      - script.stop: menu_timeout
+      - script.stop: display_wake
+      - globals.set:
+          id: ui_page
+          value: '6'
+      - light.turn_on:
+          id: tft_backlight
+          brightness: 100%
+      - lvgl.page.show: ota_page
+      - lambda: lv_task_handler();
+      - delay: 300ms
+    on_progress:
+      - lambda: |-
+          lv_bar_set_value(id(bar_ota), (int) x, LV_ANIM_OFF);
+          char buf[12];
+          snprintf(buf, sizeof(buf), "%.0f %%", x);
+          lv_label_set_text(id(lbl_ota_pct), buf);
+          lv_task_handler();
+    on_end:
+      - lvgl.label.update:
+          id: lbl_ota_title
+          text: "Fertig"
+    on_error:
+      - lvgl.label.update:
+          id: lbl_ota_title
+          text: "Update fehlgeschlagen"
+
+speaker:
+  # Hardware speaker output
+  - platform: i2s_audio
+    sample_rate: 48000
+    id: i2s_speaker
+    i2s_dout_pin: GPIO06
+    bits_per_sample: 16bit
+    i2s_audio_id: i2s_output
+    dac_type: external
+    channel: mono
+    timeout: never
+    buffer_duration: 100ms
+
+  # EQ tuned for the Visaton FRS 8 M in the closed 1 L case (box resonance ~180 Hz).
+  - platform: equalizer
+    id: speaker_eq
+    output_speaker: i2s_speaker
+    bands:
+      # 0: Protect the cone from bass it cannot reproduce.
+      - type: high_pass
+        frequency: 90Hz
+        q: 0.707
+      # 1: Bass balance. Lowers everything above 150 Hz instead of boosting
+      #    below, so the signal can never clip. Gain = -"EQ Bass".
+      - type: high_shelf
+        frequency: 150Hz
+        gain: -6dB
+        q: 0.707
+      # 2: Mid
+      - type: peaking
+        frequency: 1000Hz
+        gain: 0dB
+        q: 1.0
+      # 3: Treble
+      - type: high_shelf
+        frequency: 8000Hz
+        gain: 0dB
+        q: 0.707
+
+switch:
+  - platform: template
+    name: "EQ Enabled"
+    id: eq_enabled
+    optimistic: true
+    restore_mode: ALWAYS_ON
+    turn_on_action:
+      - lambda: "id(speaker_eq).set_enabled(true);"
+    turn_off_action:
+      - lambda: "id(speaker_eq).set_enabled(false);"
+
+number:
+  # Seconds without knob input before the display dims, on every screen; 0 = never.
+  - platform: template
+    name: "Display abdunkeln nach"
+    id: dim_after
+    entity_category: config
+    unit_of_measurement: s
+    min_value: 0
+    max_value: 300
+    step: 1
+    initial_value: 15
+    optimistic: true
+    restore_value: true
+    on_value:
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 2;"
+          then:
+            - script.execute: render_menu
+
+  - platform: template
+    name: "EQ Bass"
+    id: eq_bass
+    min_value: 0
+    max_value: 9
+    step: 0.5
+    initial_value: 6
+    optimistic: true
+    restore_value: true
+    set_action:
+      - lambda: "id(speaker_eq).set_band_gain(1, -x);"
+    # Only while a menu is open; at boot LVGL is not ready yet.
+    on_value:
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 2;"
+          then:
+            - script.execute: render_menu
+
+  - platform: template
+    name: "EQ Mid"
+    id: eq_mid
+    min_value: -12
+    max_value: 6
+    step: 0.5
+    initial_value: 0
+    optimistic: true
+    restore_value: true
+    set_action:
+      - lambda: "id(speaker_eq).set_band_gain(2, x);"
+
+  - platform: template
+    name: "EQ Treble"
+    id: eq_treble
+    min_value: -12
+    max_value: 6
+    step: 0.5
+    initial_value: 0
+    optimistic: true
+    restore_value: true
+    set_action:
+      - lambda: "id(speaker_eq).set_band_gain(3, x);"
+    on_value:
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 2;"
+          then:
+            - script.execute: render_menu
+
+sendspin:
+  id: sendspin_hub
+  task_stack_in_psram: true
+
+media_source:
+  - platform: sendspin
+    id: sendspin_source
+    # Default is 1 MB, half of this module's 2 MB PSRAM. The server only sends
+    # as much ahead as the client reports, so a smaller buffer is safe.
+    buffer_size: 300000
+  - platform: audio_http
+    id: http_source
+
+media_player:
+  - platform: speaker_source
+    name: Media Player
+    id: media_player_sendspin
+    media_pipeline:
+      speaker: speaker_eq
+      format: FLAC
+      sources:
+        - sendspin_source
+        - http_source
+    on_play:
+      - script.stop: idle_timeout
+      - lvgl.widget.hide: pause_overlay
+      - if:
+          condition:
+            lambda: "return !id(is_now_playing) && !id(radio_active);"
+          then:
+            - lvgl.widget.hide: cover_art
+            - lvgl.widget.show: cover_placeholder
+      - globals.set:
+          id: is_now_playing
+          value: 'true'
+      - if:
+          condition:
+            lambda: "return id(ui_page) <= 1;"
+          then:
+            - script.execute: show_playing
+    on_pause:
+      - if:
+          condition:
+            lambda: "return !id(radio_active);"
+          then:
+            - lvgl.widget.show: pause_overlay
+    on_idle:
+      - globals.set:
+          id: is_now_playing
+          value: 'false'
+      - lvgl.widget.hide: pause_overlay
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 1;"
+          then:
+            - script.execute: idle_timeout
+    on_volume:
+      # A volume above zero ends a mute from Home Assistant or Music Assistant; the
+      # player keeps the mute flag separately and restores it after a reboot.
+      - if:
+          condition:
+            lambda: "return id(media_player_sendspin).is_muted() && id(media_player_sendspin).volume > 0.001f;"
+          then:
+            - media_player.unmute: media_player_sendspin
+      - script.execute: refresh_volume
+      - lvgl.widget.hide: clock_date
+      - lvgl.widget.show: clock_vol
+      - lvgl.widget.hide: now_text
+      - lvgl.widget.show: now_vol
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 0;"
+          then:
+            - script.execute: display_wake
+      - script.execute: vol_idle
+
+sensor:
+  # Memory diagnostics in KB, to see whether internal RAM or PSRAM runs low.
+  - platform: template
+    name: "Heap frei"
+    unit_of_measurement: KB
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: "return heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024.0f;"
+  - platform: template
+    name: "Heap größter Block"
+    unit_of_measurement: KB
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: "return heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024.0f;"
+  - platform: template
+    name: "PSRAM frei"
+    unit_of_measurement: KB
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: "return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024.0f;"
+
+  - platform: rotary_encoder
+    name: "Encoder"
+    id: encoder
+    internal: true
+    pin_a:
+      number: GPIO38
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    pin_b:
+      number: GPIO47
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    on_clockwise:
+      - script.execute:
+          id: knob_turn
+          dir: 1
+    on_anticlockwise:
+      - script.execute:
+          id: knob_turn
+          dir: -1
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO21
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "Encoder Click"
+    id: encoder_click
+    internal: true
+    on_click:
+      min_length: 50ms
+      max_length: 500ms
+      then:
+        - script.execute: knob_click
+    on_multi_click:
+      - timing:
+          - ON for at least 800ms
+        then:
+          - script.execute: knob_hold
+
+text_sensor:
+  # Name of the station playing from the list, for Home Assistant.
+  - platform: template
+    name: "Sender"
+    id: current_station
+    icon: mdi:radio
+
+  - platform: wifi_info
+    ssid:
+      id: wifi_ssid
+      internal: true
+
+  - platform: sendspin
+    type: title
+    id: sendspin_title
+    internal: true
+    on_value:
+      - if:
+          condition:
+            lambda: "return !x.empty();"
+          then:
+            - globals.set:
+                id: radio_active
+                value: 'false'
+            - script.execute: update_playing_layout
+
+  - platform: sendspin
+    type: artist
+    id: sendspin_artist
+    internal: true
+    on_value:
+      - if:
+          condition:
+            lambda: "return !id(radio_active);"
+          then:
+            - script.execute: update_playing_layout
+
+output:
+  - platform: ledc
+    inverted: True
+    pin: GPIO07
+    id: output_blk
+
+light:
+  # Controlled by the firmware only (dim after "Display abdunkeln nach"), not shown in Home Assistant.
+  - platform: monochromatic
+    name: "LCD Backlight"
+    id: tft_backlight
+    internal: true
+    output: output_blk
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0s
+
+script:
+  ######## Stations ########
+
+  # Parse station_blob into the lists, start loading logos and redraw.
+  # With no stored list, a few tested MP3 stations are used.
+  # Check and store a station list given as "name<TAB>url<TAB>logo" lines, then load it.
+  # Used by the web page and by the Home Assistant action.
+  - id: store_stations
+    parameters:
+      text: string
+    then:
+      - lambda: |-
+          auto &blob = id(station_blob);
+          std::string out;
+          size_t count = 0, pos = 0;
+          while (pos < text.size()) {
+            size_t end = text.find('\n', pos);
+            if (end == std::string::npos) end = text.size();
+            std::string line = text.substr(pos, end - pos);
+            pos = end + 1;
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            const size_t t1 = line.find('\t');
+            if (t1 == std::string::npos) continue;
+            const size_t t2 = line.find('\t', t1 + 1);
+            const std::string name = line.substr(0, t1);
+            const std::string url = line.substr(t1 + 1, t2 == std::string::npos ? std::string::npos : t2 - t1 - 1);
+            std::string logo = t2 == std::string::npos ? "" : line.substr(t2 + 1);
+            if (logo.rfind("http", 0) != 0) logo.clear();
+            if (name.empty() || url.rfind("http", 0) != 0) {
+              ESP_LOGW("radio", "Skipping \"%s\": name empty or URL not http(s)", name.c_str());
+              continue;
+            }
+            const std::string entry = name + "\t" + url + "\t" + logo + "\n";
+            if (out.size() + entry.size() >= blob.size()) {
+              ESP_LOGW("radio", "Station list full, kept %u stations", (unsigned) count);
+              break;
+            }
+            out += entry;
+            count++;
+          }
+          std::fill(blob.begin(), blob.end(), 0);
+          std::copy(out.begin(), out.end(), blob.begin());
+          ESP_LOGI("radio", "Stored %u stations (%u bytes)", (unsigned) count, (unsigned) out.size());
+      - script.execute: load_stations
+
+  - id: load_stations
+    then:
+      - lambda: |-
+          static const char *const DEFAULTS =
+            "Deutschlandfunk\thttps://st01.sslstream.dlf.de/dlf/01/128/mp3/stream.mp3\t\n"
+            "Deutschlandfunk Kultur\thttps://st02.sslstream.dlf.de/dlf/02/128/mp3/stream.mp3\t\n"
+            "Deutschlandfunk Nova\thttps://st03.sslstream.dlf.de/dlf/03/128/mp3/stream.mp3\t\n"
+            "1LIVE\thttps://wdr-1live-live.icecastssl.wdr.de/wdr/1live/live/mp3/128/stream.mp3\t\n"
+            "WDR 2\thttps://wdr-wdr2-rheinland.icecastssl.wdr.de/wdr/wdr2/rheinland/mp3/128/stream.mp3\t\n"
+            "SWR3\thttps://liveradio.swr.de/sw282p3/swr3/play.mp3\t\n"
+            "Bayern 3\thttps://dispatcher.rndfnk.com/br/br3/live/mp3/mid\t\n"
+            "Radio Paradise\thttps://stream.radioparadise.com/mp3-128\t\n";
+          const auto &blob = id(station_blob);
+          std::string src = blob[0] ? std::string(blob.data(), strnlen(blob.data(), blob.size()))
+                                    : std::string(DEFAULTS);
+          auto &names = id(station_names);
+          auto &urls = id(station_urls);
+          auto &logo_urls = id(station_logo_urls);
+          names.clear();
+          urls.clear();
+          logo_urls.clear();
+          size_t pos = 0;
+          while (pos < src.size()) {
+            size_t end = src.find('\n', pos);
+            if (end == std::string::npos) end = src.size();
+            std::string line = src.substr(pos, end - pos);
+            size_t t1 = line.find('\t');
+            if (t1 != std::string::npos) {
+              size_t t2 = line.find('\t', t1 + 1);
+              names.push_back(line.substr(0, t1));
+              urls.push_back(line.substr(t1 + 1, t2 == std::string::npos ? std::string::npos : t2 - t1 - 1));
+              logo_urls.push_back(t2 == std::string::npos ? "" : line.substr(t2 + 1));
+            }
+            pos = end + 1;
+          }
+          if (id(station_index) >= (int) names.size()) id(station_index) = 0;
+          id(logos)->load(names, urls, logo_urls);
+          ESP_LOGI("radio", "%u stations loaded (%s)", (unsigned) names.size(),
+                   blob[0] ? "stored list" : "defaults");
+      - script.execute: refresh_logos
+
+  # Redraw what shows station logos.
+  - id: refresh_logos
+    then:
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 1 && id(radio_active);"
+          then:
+            - script.execute: update_playing_layout
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 2;"
+          then:
+            - script.execute: render_menu
+
+  - id: play_station
+    parameters:
+      idx: int
+    then:
+      - if:
+          condition:
+            lambda: "return idx >= 0 && idx < (int) id(station_urls).size();"
+          then:
+            - globals.set:
+                id: station_index
+                value: !lambda "return idx;"
+            - globals.set:
+                id: radio_active
+                value: 'true'
+            - media_player.play_media:
+                id: media_player_sendspin
+                media_url: !lambda "return id(station_urls)[idx];"
+            - lambda: "id(current_station).publish_state(id(station_names)[idx]);"
+            - script.execute: show_playing
+          else:
+            - logger.log:
+                level: WARN
+                format: "No station at index %d"
+                args: [idx]
+
+  ######## Navigation ########
+
+  - id: show_idle
+    then:
+      - script.stop: menu_timeout
+      - globals.set:
+          id: ui_page
+          value: '0'
+      - script.execute: update_time_labels
+      - lvgl.widget.show: clock_date
+      - lvgl.widget.hide: clock_vol
+      - lvgl.page.show: idle_page
+      - script.execute: display_wake
+
+  - id: show_playing
+    then:
+      - script.stop: menu_timeout
+      - globals.set:
+          id: ui_page
+          value: '1'
+      - script.execute: update_playing_layout
+      - lvgl.page.show: now_playing_page
+      - script.execute: display_wake
+
+  # Radio: station logo, name, "Live". Music Assistant: cover, title, artist.
+  - id: update_playing_layout
+    then:
+      - lambda: |-
+          using namespace esphome::radio_ui;
+          auto clean = [](const std::string &s) {
+            std::string out;
+            for (unsigned char c : s)
+              if (c >= 0x20 && c != 0x7F) out += c;
+            return out;
+          };
+          const lv_font_t *fonts[3] = {id(f16m)->get_lv_font(), id(f13m)->get_lv_font(), id(f12m)->get_lv_font()};
+          std::string name, sub;
+          if (id(radio_active)) {
+            const auto &names = id(station_names);
+            const int idx = id(station_index);
+            if (idx < 0 || idx >= (int) names.size()) return;
+            name = names[idx];
+            sub = "Live";
+            lv_label_set_text(id(lbl_source), "Radio");
+            lv_obj_remove_flag(id(radio_logo_box), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(id(cover_box), LV_OBJ_FLAG_HIDDEN);
+            esphome::station_logos::show_logo(id(radio_logo_box), id(radio_logo_img), id(radio_logo_lbl),
+                                              id(logos)->big(idx), name);
+          } else {
+            name = clean(id(sendspin_title).state);
+            sub = clean(id(sendspin_artist).state);
+            lv_label_set_text(id(lbl_source), "Music Assistant");
+            lv_obj_add_flag(id(radio_logo_box), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(id(cover_box), LV_OBJ_FLAG_HIDDEN);
+          }
+          lv_label_set_text(id(lbl_now_name), name.c_str());
+          lv_obj_set_style_text_font(id(lbl_now_name), fit_font(name.c_str(), fonts, 3, 148), 0);
+          lv_label_set_text(id(lbl_now_sub), sub.c_str());
+
+  # Back to the playing screen when something plays, else to the clock.
+  - id: go_home
+    then:
+      - globals.set:
+          id: menu_edit
+          value: 'false'
+      - if:
+          condition:
+            or:
+              - media_player.is_playing: media_player_sendspin
+              - media_player.is_paused: media_player_sendspin
+          then:
+            - script.execute: show_playing
+          else:
+            - script.execute: show_idle
+
+  ######## Carousel ########
+
+  # Open a carousel: m = 0 main menu, 1 radio, 2 settings; s = selected tile.
+  - id: open_menu
+    parameters:
+      m: int
+      s: int
+    then:
+      - globals.set:
+          id: menu
+          value: !lambda "return m;"
+      - globals.set:
+          id: menu_sel
+          value: !lambda "return s;"
+      - globals.set:
+          id: menu_edit
+          value: 'false'
+      - globals.set:
+          id: ui_page
+          value: '2'
+      - script.execute: render_menu
+      - lvgl.page.show: carousel_page
+      - script.execute: menu_timeout
+
+  # Build the tiles of the current menu and draw them.
+  - id: render_menu
+    then:
+      - lambda: |-
+          using namespace esphome::radio_ui;
+          auto back = [] {
+            Item i;
+            i.kind = Item::BACK;
+            i.icon = ICON_BACK;
+            i.label = "Zurück";
+            return i;
+          };
+          auto icon = [](const char *ic, const std::string &label, const std::string &sub) {
+            Item i;
+            i.kind = Item::ICON;
+            i.icon = ic;
+            i.label = label;
+            i.sub = sub;
+            return i;
+          };
+          auto gauge = [](const std::string &label, float v, float lo, float hi, const std::string &sub) {
+            Item i;
+            i.kind = Item::GAUGE;
+            i.label = label;
+            i.value = v;
+            i.lo = lo;
+            i.hi = hi;
+            i.sub = sub;
+            return i;
+          };
+          const auto &names = id(station_names);
+          const int sel = id(menu_sel);
+          const bool edit = id(menu_edit);
+          const int idx = id(station_index);
+          const bool playing = id(radio_active) && id(is_now_playing) && idx >= 0 && idx < (int) names.size();
+          std::vector<Item> items;
+          const char *title = "";
+          switch (id(menu)) {
+            case 0: {
+              title = "Menü";
+              const std::string radio_sub =
+                  playing ? names[idx] + " läuft" : std::to_string(names.size()) + " Sender";
+              items.push_back(back());
+              items.push_back(icon(ICON_RADIO, "Radio", radio_sub));
+              items.push_back(icon(ICON_SETTINGS, "Einstellungen",
+                                   "Bass " + gain_text(id(eq_bass).state) + "  ·  Höhen " + gain_text(id(eq_treble).state)));
+              items.push_back(icon(ICON_INFO, "Info", "WLAN, IP, Firmware"));
+              break;
+            }
+            case 1: {
+              title = "Radio";
+              items.push_back(back());
+              for (size_t k = 0; k < names.size(); k++) {
+                Item i;
+                i.kind = Item::STATION;
+                i.station = (int) k;
+                i.label = names[k];
+                if (playing && (int) k == idx) i.sub = "Läuft gerade";
+                items.push_back(i);
+              }
+              break;
+            }
+            default: {
+              title = "Einstellungen";
+              const char *hint_edit = "Drehen zum Ändern", *hint = "Drücken zum Ändern";
+              items.push_back(back());
+              items.push_back(gauge("Bass", id(eq_bass).state, 0, 9, edit && sel == 1 ? hint_edit : hint));
+              items.push_back(gauge("Höhen", id(eq_treble).state, -12, 6, edit && sel == 2 ? hint_edit : hint));
+              Item dim = gauge("Abdunkeln nach", dim_step(id(dim_after).state), 0, DIM_STEP_COUNT - 1,
+                               edit && sel == 3 ? hint_edit : hint);
+              dim.value_text = dim_text(id(dim_after).state);
+              items.push_back(dim);
+              break;
+            }
+          }
+          Carousel c{};
+          c.title = id(c_title);
+          c.name = id(c_name);
+          c.sub = id(c_sub);
+          c.count = id(c_count);
+          c.chev_left = id(c_chev_l);
+          c.chev_right = id(c_chev_r);
+          c.center = {id(c_root), id(c_logo), id(c_img), id(c_ini), id(c_icon), id(c_arc), id(c_arc_lbl)};
+          c.left = {id(l_root), id(l_logo), id(l_img), id(l_ini), id(l_icon), id(l_arc), id(l_arc_lbl)};
+          c.right = {id(r_root), id(r_logo), id(r_img), id(r_ini), id(r_icon), id(r_arc), id(r_arc_lbl)};
+          lv_obj_t *dots[9] = {id(dot0), id(dot1), id(dot2), id(dot3), id(dot4), id(dot5), id(dot6), id(dot7), id(dot8)};
+          for (int k = 0; k < 9; k++) c.dots[k] = dots[k];
+          c.name_fonts[0] = id(f13m)->get_lv_font();
+          c.name_fonts[1] = id(f12m)->get_lv_font();
+          c.name_fonts[2] = id(f11m)->get_lv_font();
+          id(menu_sel) = std::max(0, std::min(sel, (int) items.size() - 1));
+          render(c, title, items, id(menu_sel), edit, id(logos), names);
+
+  # Move the selection by dir within the current menu.
+  - id: clamp_sel
+    parameters:
+      dir: int
+    then:
+      - lambda: |-
+          int n = 4;  // main menu and settings
+          if (id(menu) == 1) n = (int) id(station_names).size() + 1;
+          id(menu_sel) = std::max(0, std::min(n - 1, id(menu_sel) + dir));
+
+  # Info page: all values on one page.
+  - id: open_info
+    then:
+      - globals.set:
+          id: ui_page
+          value: '3'
+      - lambda: |-
+          lv_label_set_text(id(lbl_info_ssid), id(wifi_ssid).state.c_str());
+          char buf[24];
+          if (std::isnan(id(wifi_signal_strength).state)) snprintf(buf, sizeof(buf), "-");
+          else snprintf(buf, sizeof(buf), "%d dBm", (int) id(wifi_signal_strength).state);
+          lv_label_set_text(id(lbl_info_rssi), buf);
+          lv_label_set_text(id(lbl_info_ip), id(ip_address).state.c_str());
+          lv_label_set_text(id(lbl_info_ha), esphome::api::global_api_server->is_connected() ? "verbunden" : "getrennt");
+          lv_label_set_text(id(lbl_info_version), ESPHOME_PROJECT_VERSION);
+          snprintf(buf, sizeof(buf), "%u", (unsigned) id(station_names).size());
+          lv_label_set_text(id(lbl_info_count), buf);
+      - lvgl.page.show: info_page
+      - script.execute: menu_timeout
+
+  # One level up: sub menus and info go to the main menu, the main menu goes home.
+  - id: menu_back
+    then:
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 2 && id(menu_edit);"
+          then:
+            - globals.set:
+                id: menu_edit
+                value: 'false'
+            - script.execute: render_menu
+          else:
+            - if:
+                condition:
+                  lambda: "return id(ui_page) == 2 && id(menu) == 0;"
+                then:
+                  - script.execute: go_home
+                else:
+                  - script.execute:
+                      id: open_menu
+                      m: 0
+                      s: !lambda |-
+                        if (id(ui_page) == 3) return 3;
+                        return id(menu) == 1 ? 1 : 2;
+
+  # Click on a tile.
+  - id: menu_click
+    then:
+      - if:
+          condition:
+            lambda: "return id(menu_sel) == 0;"
+          then:
+            - script.execute: menu_back
+          else:
+            - if:
+                condition:
+                  lambda: "return id(menu) == 0 && id(menu_sel) == 1;"
+                then:
+                  - script.execute:
+                      id: open_menu
+                      m: 1
+                      s: !lambda "return id(station_index) + 1;"
+                else:
+                  - if:
+                      condition:
+                        lambda: "return id(menu) == 0 && id(menu_sel) == 2;"
+                      then:
+                        - script.execute:
+                            id: open_menu
+                            m: 2
+                            s: 1
+                      else:
+                        - if:
+                            condition:
+                              lambda: "return id(menu) == 0;"
+                            then:
+                              - script.execute: open_info
+                            else:
+                              - if:
+                                  condition:
+                                    lambda: "return id(menu) == 1;"
+                                  then:
+                                    - script.execute:
+                                        id: play_station
+                                        idx: !lambda "return id(menu_sel) - 1;"
+                                  else:
+                                    - lambda: "id(menu_edit) = !id(menu_edit);"
+                                    - script.execute: render_menu
+
+  # Leave menus and info after 20 s without input.
+  - id: menu_timeout
+    mode: restart
+    then:
+      - delay: 20s
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 2 || id(ui_page) == 3;"
+          then:
+            - script.execute: go_home
+
+  ######## Knob ########
+
+  # While the display is dimmed, the first turn, click or hold only wakes it.
+
+  - id: knob_turn
+    mode: queued
+    max_runs: 8
+    parameters:
+      dir: int
+    then:
+      - if:
+          condition:
+            lambda: "return id(display_dimmed);"
+          then:
+            - script.execute: display_wake
+          else:
+            - script.execute: display_wake
+            - if:
+                condition:
+                  lambda: "return id(ui_page) == 2;"
+                then:
+                  - if:
+                      condition:
+                        lambda: "return id(menu_edit);"
+                      then:
+                        - lambda: |-
+                            using namespace esphome::radio_ui;
+                            if (id(menu_sel) == 3) {
+                              const int k = std::max(0, std::min(DIM_STEP_COUNT - 1, dim_step(id(dim_after).state) + dir));
+                              auto call = id(dim_after).make_call();
+                              call.set_value(DIM_STEPS[k]);
+                              call.perform();
+                            } else {
+                              auto *num = id(menu_sel) == 1 ? id(eq_bass) : id(eq_treble);
+                              auto call = num->make_call();
+                              call.set_value(num->state + 0.5f * dir);
+                              call.perform();
+                            }
+                      else:
+                        - script.execute:
+                            id: clamp_sel
+                            dir: !lambda "return dir;"
+                  - script.execute: render_menu
+                  - script.execute: menu_timeout
+                else:
+                  - if:
+                      condition:
+                        lambda: "return id(ui_page) <= 1;"
+                      then:
+                        - media_player.volume_set:
+                            id: media_player_sendspin
+                            volume: !lambda "return clamp(id(media_player_sendspin).volume + 0.05f * dir, 0.0f, 1.0f);"
+
+  - id: knob_click
+    then:
+      - if:
+          condition:
+            lambda: "return id(display_dimmed);"
+          then:
+            - script.execute: display_wake
+          else:
+            - script.execute: display_wake
+            - if:
+                condition:
+                  lambda: "return id(ui_page) == 0;"
+                then:
+                  - script.execute:
+                      id: play_station
+                      idx: !lambda "return id(station_index);"
+                else:
+                  - if:
+                      condition:
+                        lambda: "return id(ui_page) == 1;"
+                      then:
+                        - if:
+                            condition:
+                              lambda: "return id(radio_active);"
+                            then:
+                              - script.execute:
+                                  id: open_menu
+                                  m: 1
+                                  s: !lambda "return id(station_index) + 1;"
+                            else:
+                              - media_player.toggle: media_player_sendspin
+                      else:
+                        - if:
+                            condition:
+                              lambda: "return id(ui_page) == 2;"
+                            then:
+                              - script.execute: menu_click
+                              - script.execute: menu_timeout
+                            else:
+                              - if:
+                                  condition:
+                                    lambda: "return id(ui_page) == 3;"
+                                  then:
+                                    - script.execute: menu_back
+
+  # Hold: mute on clock and playing screen, one level back in menus.
+  - id: knob_hold
+    then:
+      - if:
+          condition:
+            lambda: "return id(display_dimmed);"
+          then:
+            - script.execute: display_wake
+          else:
+            - script.execute: display_wake
+            - if:
+                condition:
+                  lambda: "return id(ui_page) <= 1;"
+                then:
+                  - if:
+                      condition:
+                        lambda: "return id(media_player_sendspin).volume == 0.0f;"
+                      then:
+                        - media_player.volume_set:
+                            id: media_player_sendspin
+                            volume: !lambda "return id(volume_before_mute);"
+                      else:
+                        - globals.set:
+                            id: volume_before_mute
+                            value: !lambda "return id(media_player_sendspin).volume;"
+                        - media_player.volume_set:
+                            id: media_player_sendspin
+                            volume: 0.0
+                else:
+                  - if:
+                      condition:
+                        lambda: "return id(ui_page) == 2 || id(ui_page) == 3;"
+                      then:
+                        - script.execute: menu_back
+
+  ######## Display ########
+
+  # Full brightness on any input; the clock dims to 30 % after 15 s.
+  - id: display_wake
+    mode: restart
+    then:
+      - globals.set:
+          id: display_dimmed
+          value: 'false'
+      - light.turn_on:
+          id: tft_backlight
+          brightness: 100%
+      - if:
+          condition:
+            lambda: "return id(dim_after).state > 0;"
+          then:
+            - delay: !lambda "return (uint32_t) id(dim_after).state * 1000;"
+            - globals.set:
+                id: display_dimmed
+                value: 'true'
+            - light.turn_on:
+                id: tft_backlight
+                brightness: 30%
+                transition_length: 1s
+
+  # Volume row on the playing screen and on the clock.
+  - id: refresh_volume
+    then:
+      - lambda: |-
+          using namespace esphome::radio_ui;
+          const float v = id(media_player_sendspin).volume;
+          const bool muted = v <= 0.001f || id(media_player_sendspin).is_muted();
+          const int pct = muted ? 0 : (int) lroundf(v * 100);
+          char buf[8];
+          snprintf(buf, sizeof(buf), "%d", pct);
+          const lv_font_t *font = muted ? id(f16m)->get_lv_font() : id(f20m)->get_lv_font();
+          for (lv_obj_t *num : {id(lbl_vol_pct), id(lbl_clock_vol)}) {
+            lv_label_set_text(num, muted ? "Stumm" : buf);
+            lv_obj_set_style_text_font(num, font, 0);
+            lv_obj_set_style_text_color(num, lv_color_hex(muted ? SUB : TEXT), 0);
+            lv_obj_set_y(num, muted ? 2 : 0);  // same centre line for 16 and 20 px
+          }
+          for (lv_obj_t *bar : {id(bar_vol), id(bar_clock_vol)})
+            lv_bar_set_value(bar, pct, LV_ANIM_OFF);
+
+  # Two seconds after the last change: text back instead of the volume row.
+  - id: vol_idle
+    mode: restart
+    then:
+      - delay: 2s
+      - lvgl.widget.show: clock_date
+      - lvgl.widget.hide: clock_vol
+      - lvgl.widget.show: now_text
+      - lvgl.widget.hide: now_vol
+
+  - id: update_time_labels
+    then:
+      - lambda: |-
+          auto t = id(ha_time).now();
+          if (!t.is_valid()) return;
+          static const char *const DAYS[] = {"Sonntag", "Montag", "Dienstag", "Mittwoch",
+                                             "Donnerstag", "Freitag", "Samstag"};
+          static const char *const MONTHS[] = {"Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
+                                               "August", "September", "Oktober", "November", "Dezember"};
+          char buf[40];
+          snprintf(buf, sizeof(buf), "%02d:%02d", t.hour, t.minute);
+          lv_label_set_text(id(lbl_idle_time), buf);
+          lv_label_set_text(id(lbl_top_time), buf);
+          lv_label_set_text(id(lbl_idle_day), DAYS[t.day_of_week - 1]);
+          snprintf(buf, sizeof(buf), "%d. %s", t.day_of_month, MONTHS[t.month - 1]);
+          lv_label_set_text(id(lbl_idle_date), buf);
+
+  - id: idle_timeout
+    mode: restart
+    then:
+      - delay: 2s
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 1;"
+          then:
+            - script.execute: show_idle
+
+display:
+  - platform: mipi_spi
+    model: ST7735
+    data_rate: 40Mhz
+    dimensions:
+      height: 160
+      width: 128
+      offset_height: 1
+      offset_width: 2
+      # Controller memory is 132x162. With 270 degree rotation the driver uses
+      # pad_height as the horizontal offset, so both pads must match the panel.
+      pad_height: 1
+      pad_width: 2
+    cs_pin: GPIO17
+    dc_pin: GPIO18
+    reset_pin: GPIO08
+
+image:
+  - platform: sendspin
+    id: sendspin_cover_slot
+    format: JPEG
+    type: RGB565
+    resize: 56x56
+    source: ALBUM
+    current_image:
+      id: sendspin_cover_art
+    on_image_display:
+      - lvgl.image.update:
+          id: cover_art
+          src: sendspin_cover_art
+      - lvgl.widget.show: cover_art
+      - lvgl.widget.hide: cover_placeholder
+    on_image_clear:
+      - lvgl.widget.hide: cover_art
+      - lvgl.widget.show: cover_placeholder
+    on_image_error:
+      - logger.log: "Cover art: no image available"
+      - lvgl.widget.hide: cover_art
+      - lvgl.widget.show: cover_placeholder
+
+# Montserrat with Latin glyphs (umlauts). Medium weight, because thin strokes
+# vanish on the TN panel at an angle.
+font:
+  - {file: "gfonts://Montserrat@500", id: f10m, size: 10, bpp: 4, glyphsets: [GF_Latin_Core]}
+  - {file: "gfonts://Montserrat@500", id: f11m, size: 11, bpp: 4, glyphsets: [GF_Latin_Core]}
+  - {file: "gfonts://Montserrat@500", id: f12m, size: 12, bpp: 4, glyphsets: [GF_Latin_Core]}
+  - {file: "gfonts://Montserrat@500", id: f13m, size: 13, bpp: 4, glyphsets: [GF_Latin_Core]}
+  - {file: "gfonts://Montserrat@500", id: f16m, size: 16, bpp: 4, glyphsets: [GF_Latin_Core]}
+  - {file: "gfonts://Montserrat@500", id: f20m, size: 20, bpp: 4, glyphs: "0123456789"}
+  - {file: "gfonts://Montserrat@500", id: f17m, size: 17, bpp: 4, glyphs: "+-.0123456789Ausm"}
+  - {file: "gfonts://Montserrat", id: f44r, size: 44, bpp: 4, glyphs: "0123456789:-"}
+
+  # Tabler line icons: volume, mute, chevrons, back, tune, info, radio,
+  # settings, music, pause.
+  - {file: {type: web, url: '${tabler_font}'}, id: ti16, size: 16, bpp: 4, glyphs: ["", ""]}
+  - {file: {type: web, url: '${tabler_font}'}, id: ti20, size: 20, bpp: 4,
+     glyphs: ["", "", "", "", ""]}
+  - {file: {type: web, url: '${tabler_font}'}, id: ti22, size: 22, bpp: 4, glyphs: [""]}
+  - {file: {type: web, url: '${tabler_font}'}, id: ti34, size: 34, bpp: 4,
+     glyphs: ["", "", "", "", "", ""]}
+
+########################################################################
+# Colours (see radio_ui.h): background 0x060608, text 0xFFFFFF, secondary
+# 0xC4C4CC, dim 0x787880, track 0x46464E, accent 0xFFB020 (only while editing).
+
+lvgl:
+  rotation: 270
+  default_font: f12m
+  style_definitions:
+    - id: page_style
+      bg_color: 0x060608
+      bg_opa: COVER
+    - id: plain
+      bg_opa: TRANSP
+      border_width: 0
+      pad_all: 0
+      radius: 0
+    # No clip_corner: logos carry their rounded corners in the pixels, so LVGL
+    # does not need a temporary layer buffer for every redraw.
+    - id: logo_box
+      bg_color: 0x26262E
+      bg_opa: COVER
+      border_width: 0
+      pad_all: 0
+
+  pages:
+    - id: boot_page
+      styles: page_style
+      widgets:
+        - label: {text: "Web Radio", x: 0, y: 48, width: 160, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
+        - label: {text: "Verbinde mit WLAN …", x: 0, y: 70, width: 160, text_align: CENTER, text_font: f10m, text_color: 0xC4C4CC}
+
+    # 0: Clock. Turning shows the volume row instead of weekday and date.
+    - id: idle_page
+      styles: page_style
+      widgets:
+        - label: {id: lbl_idle_time, text: "--:--", x: 0, y: 17, width: 160, text_align: CENTER, text_font: f44r, text_color: 0xFFFFFF}
+        - obj:
+            id: clock_date
+            styles: plain
+            x: 0
+            y: 70
+            width: 160
+            height: 42
+            widgets:
+              - label: {id: lbl_idle_day, text: "", x: 0, y: 0, width: 160, text_align: CENTER, text_font: f16m, text_color: 0xC4C4CC}
+              - label: {id: lbl_idle_date, text: "", x: 0, y: 21, width: 160, text_align: CENTER, text_font: f16m, text_color: 0xC4C4CC}
+        - obj:
+            id: clock_vol
+            styles: plain
+            x: 0
+            y: 78
+            width: 160
+            height: 34
+            hidden: true
+            widgets:
+              - label: {id: lbl_clock_vol, text: "", x: 0, y: 0, width: 160, text_align: CENTER, text_font: f20m, text_color: 0xFFFFFF}
+              - bar:
+                  id: bar_clock_vol
+                  x: 20
+                  y: 28
+                  width: 120
+                  height: 6
+                  min_value: 0
+                  max_value: 100
+                  value: 50
+                  radius: 3
+                  bg_color: 0x46464E
+                  bg_opa: COVER
+                  indicator:
+                    bg_color: 0xFFB020
+                    radius: 3
+
+    # 1: Playing. Radio shows the station logo, Music Assistant the cover.
+    - id: now_playing_page
+      styles: page_style
+      widgets:
+        - label: {id: lbl_source, text: "Radio", x: 8, y: 2, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_top_time, text: "", x: 104, y: 2, width: 48, text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
+        - obj:
+            id: radio_logo_box
+            styles: logo_box
+            x: 52
+            y: 20
+            width: 56
+            height: 56
+            radius: 12
+            widgets:
+              - image: {id: radio_logo_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
+              - label: {id: radio_logo_lbl, text: "", align: CENTER, text_font: f13m, text_color: 0xC4C4CC}
+        - obj:
+            id: cover_box
+            styles: logo_box
+            x: 52
+            y: 20
+            width: 56
+            height: 56
+            radius: 10
+            hidden: true
+            widgets:
+              - label: {id: cover_placeholder, text: "", align: CENTER, text_font: ti34, text_color: 0x787880}
+              - image: {id: cover_art, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
+              - obj:
+                  id: pause_overlay
+                  x: 0
+                  y: 0
+                  width: 56
+                  height: 56
+                  bg_color: 0x000000
+                  bg_opa: 55%
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
+                  widgets:
+                    - label: {text: "", align: CENTER, text_font: ti22, text_color: 0xFFFFFF}
+        - obj:
+            id: now_text
+            styles: plain
+            x: 0
+            y: 80
+            width: 160
+            height: 44
+            widgets:
+              - label: {id: lbl_now_name, text: "", height: 20, x: 6, y: 2, width: 148, long_mode: DOT, text_align: CENTER, text_font: f16m, text_color: 0xFFFFFF}
+              - label: {id: lbl_now_sub, text: "", height: 15, x: 6, y: 25, width: 148, long_mode: DOT, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
+        - obj:
+            id: now_vol
+            styles: plain
+            x: 0
+            y: 80
+            width: 160
+            height: 34
+            hidden: true
+            widgets:
+              - label: {id: lbl_vol_pct, text: "", x: 0, y: 0, width: 160, text_align: CENTER, text_font: f20m, text_color: 0xFFFFFF}
+              - bar:
+                  id: bar_vol
+                  x: 20
+                  y: 28
+                  width: 120
+                  height: 6
+                  min_value: 0
+                  max_value: 100
+                  value: 50
+                  radius: 3
+                  bg_color: 0x46464E
+                  bg_opa: COVER
+                  indicator:
+                    bg_color: 0xFFB020
+                    radius: 3
+
+    # 2: Carousel for all menus, filled by render_menu / radio_ui::render.
+    - id: carousel_page
+      styles: page_style
+      widgets:
+        - label: {id: c_title, text: "", x: 0, y: 1, width: 160, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
+        - obj:
+            id: c_root
+            styles: plain
+            x: 52
+            y: 20
+            width: 56
+            height: 56
+            widgets:
+              - obj:
+                  id: c_logo
+                  styles: logo_box
+                  x: 0
+                  y: 0
+                  width: 56
+                  height: 56
+                  radius: 12
+                  hidden: true
+                  widgets:
+                    - image: {id: c_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
+                    - label: {id: c_ini, text: "", align: CENTER, text_font: f13m, text_color: 0xC4C4CC}
+              - label: {id: c_icon, text: "", align: CENTER, text_font: ti34, text_color: 0xFFFFFF, hidden: true}
+              - arc: {id: c_arc, align: CENTER, width: 50, height: 50, min_value: 0, max_value: 18, value: 0, hidden: true}
+              - label: {id: c_arc_lbl, text: "", align: CENTER, text_font: f17m, text_color: 0xFFFFFF, hidden: true}
+        - obj:
+            id: l_root
+            styles: plain
+            x: 4
+            y: 32
+            width: 32
+            height: 32
+            widgets:
+              - obj:
+                  id: l_logo
+                  styles: logo_box
+                  x: 0
+                  y: 0
+                  width: 32
+                  height: 32
+                  radius: 7
+                  hidden: true
+                  widgets:
+                    - image: {id: l_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
+                    - label: {id: l_ini, text: "", align: CENTER, text_font: f10m, text_color: 0xC4C4CC}
+              - label: {id: l_icon, text: "", align: CENTER, text_font: ti20, text_color: 0xFFFFFF, hidden: true}
+              - arc: {id: l_arc, align: CENTER, width: 28, height: 28, min_value: 0, max_value: 18, value: 0, hidden: true}
+              - label: {id: l_arc_lbl, text: "", align: CENTER, text_font: f10m, text_color: 0xFFFFFF, hidden: true}
+        - obj:
+            id: r_root
+            styles: plain
+            x: 124
+            y: 32
+            width: 32
+            height: 32
+            widgets:
+              - obj:
+                  id: r_logo
+                  styles: logo_box
+                  x: 0
+                  y: 0
+                  width: 32
+                  height: 32
+                  radius: 7
+                  hidden: true
+                  widgets:
+                    - image: {id: r_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
+                    - label: {id: r_ini, text: "", align: CENTER, text_font: f10m, text_color: 0xC4C4CC}
+              - label: {id: r_icon, text: "", align: CENTER, text_font: ti20, text_color: 0xFFFFFF, hidden: true}
+              - arc: {id: r_arc, align: CENTER, width: 28, height: 28, min_value: 0, max_value: 18, value: 0, hidden: true}
+              - label: {id: r_arc_lbl, text: "", align: CENTER, text_font: f10m, text_color: 0xFFFFFF, hidden: true}
+        - label: {id: c_chev_l, text: "", x: 28, y: 40, text_font: ti16, text_color: 0xC4C4CC, hidden: true}
+        - label: {id: c_chev_r, text: "", x: 116, y: 40, text_font: ti16, text_color: 0xC4C4CC, hidden: true}
+        - label: {id: c_name, text: "", height: 16, x: 6, y: 83, width: 148, long_mode: DOT, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
+        - label: {id: c_sub, text: "", height: 15, x: 6, y: 99, width: 148, long_mode: DOT, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: c_count, text: "", x: 0, y: 114, width: 160, text_align: CENTER, text_font: f10m, text_color: 0xC4C4CC, hidden: true}
+        - obj: {id: dot0, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+        - obj: {id: dot1, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+        - obj: {id: dot2, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+        - obj: {id: dot3, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+        - obj: {id: dot4, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+        - obj: {id: dot5, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+        - obj: {id: dot6, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+        - obj: {id: dot7, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+        - obj: {id: dot8, x: 0, y: 118, width: 4, height: 4, radius: 2, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
+
+    # 3: Info, all values on one page. Click or hold returns to the menu.
+    - id: info_page
+      styles: page_style
+      widgets:
+        - label: {text: "Info", x: 0, y: 1, width: 160, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {text: "WLAN", x: 8, y: 22, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_ssid, text: "", height: 15, x: 60, y: 22, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "Signal", x: 8, y: 39, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_rssi, text: "", height: 15, x: 60, y: 39, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "IP", x: 8, y: 56, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_ip, text: "", height: 15, x: 60, y: 56, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "HA", x: 8, y: 73, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_ha, text: "", height: 15, x: 60, y: 73, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "Firmware", x: 8, y: 90, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_version, text: "", height: 15, x: 60, y: 90, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "Sender", x: 8, y: 107, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_count, text: "", height: 15, x: 60, y: 107, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+
+    - id: ota_page
+      styles: page_style
+      widgets:
+        - label: {id: lbl_ota_title, text: "Update läuft", x: 0, y: 44, width: 160, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
+        - bar:
+            id: bar_ota
+            x: 30
+            y: 68
+            width: 100
+            height: 3
+            min_value: 0
+            max_value: 100
+            value: 0
+            radius: 1
+            bg_color: 0x46464E
+            bg_opa: COVER
+            indicator:
+              bg_color: 0xFFFFFF
+              radius: 1
+        - label: {id: lbl_ota_pct, text: "0 %", x: 0, y: 80, width: 160, text_align: CENTER, text_font: f10m, text_color: 0xC4C4CC}
+        - label: {text: "Nicht ausschalten", x: 0, y: 108, width: 160, text_align: CENTER, text_font: f10m, text_color: 0x787880}

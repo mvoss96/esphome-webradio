@@ -1,0 +1,16 @@
+# Web radio device. All radio parts come from webradio.yaml in this repository.
+esphome:
+  name: web-radio
+  friendly_name: Web Radio
+
+packages:
+  # Logger, API, OTA, Wi-Fi and the diagnostic sensors the info page uses
+  # (ids wifi_signal_strength and ip_address).
+  common:
+    url: https://github.com/mvoss96/esphome-config
+    files: [generic-wifi.yaml, diagnostics.yaml]
+    refresh: 10s
+  webradio:
+    url: https://github.com/mvoss96/esphome-webradio
+    files: [webradio.yaml]
+    refresh: 10s

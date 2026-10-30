@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Web Radio</title>
+<style>
+  :root {
+    --bg: #0b0b0d; --row: #141417; --line: #232328; --text: #f4f4f6; --sub: #a3a3ad; --dim: #6c6c76;
+    --accent: #ffb020; --danger: #ff6b5e;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 28px 20px 48px; }
+  header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+  h1 { margin: 2px 0 0; font-size: 26px; font-weight: 600; }
+  a { color: var(--sub); text-decoration: none; font-size: 14px; }
+  a:hover { color: var(--text); }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  .section { display: flex; justify-content: space-between; color: var(--sub); font-size: 13px; margin: 0 4px 10px; }
+  .state { color: var(--sub); font-size: 13px; }
+  .ha { color: var(--dim); font-size: 13px; }
+  .state.error { color: var(--danger); }
+
+  /* Logo: initials, covered by the image if it loads. */
+  .logo { position: relative; overflow: hidden; width: 40px; height: 40px; border-radius: 9px; background: #26262e;
+          flex: none; display: grid; place-items: center; color: var(--sub); font-size: 13px; font-weight: 600; }
+  .logo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+  /* Control view */
+  .now { display: flex; align-items: center; gap: 16px; padding: 16px; background: var(--row);
+         border: 1px solid var(--line); border-radius: 12px; }
+  .now .logo { width: 72px; height: 72px; border-radius: 14px; font-size: 20px; }
+  .now .text { flex: 1; min-width: 0; }
+  .now .name { font-size: 19px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .now .info { color: var(--dim); font-size: 14px; }
+  .now .info.on { color: var(--accent); }
+  .toggle { width: 52px; height: 52px; border-radius: 50%; background: var(--text); color: var(--bg);
+            display: grid; place-items: center; flex: none; }
+  .volume { display: flex; align-items: center; gap: 14px; padding: 16px 4px 26px; color: var(--sub); }
+  .volume input { flex: 1; accent-color: var(--accent); }
+  .volume .value { min-width: 40px; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+  .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .tile { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 8px 12px;
+          background: var(--row); border: 1px solid var(--line); border-radius: 12px; }
+  .tile .logo { width: 56px; height: 56px; border-radius: 12px; }
+  .tile .name { font-size: 13px; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile.on { border-color: var(--accent); }
+  .tile.on .name { color: var(--accent); }
+
+  /* Manage view */
+  .back { display: inline-block; margin-bottom: 14px; }
+  .save { display: flex; align-items: center; gap: 12px; }
+  .primary { background: var(--accent); color: #1a1205; font-weight: 600; padding: 8px 16px; border-radius: 8px; }
+  .primary[disabled] { background: var(--line); color: var(--dim); cursor: default; }
+  .search { margin-bottom: 26px; position: relative; }
+  .search input { width: 100%; padding: 12px 14px 12px 40px; border-radius: 10px; border: 1px solid var(--line);
+                  background: var(--row); color: var(--text); font: inherit; outline: none; }
+  .search input:focus { border-color: #3a3a42; }
+  .search svg { position: absolute; left: 13px; top: 13px; color: var(--dim); }
+  .results { margin-top: 6px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .results:empty { display: none; }
+  .list { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .item, .result { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--row);
+                   border-top: 1px solid var(--line); }
+  .item:first-child, .result:first-child { border-top: 0; }
+  .item.dragging { position: relative; z-index: 2; background: #1c1c21; }
+  .handle { color: var(--dim); cursor: grab; touch-action: none; padding: 6px 2px; }
+  .item .text, .result .text { flex: 1; min-width: 0; }
+  .item .name, .result .name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .name { cursor: text; }
+  .meta { color: var(--dim); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .result .logo { width: 32px; height: 32px; border-radius: 7px; }
+  .result.off { opacity: .45; }
+  .icon { color: var(--sub); padding: 8px; border-radius: 8px; display: grid; }
+  .icon:hover { background: #222227; color: var(--danger); }
+  .add { color: var(--accent); font-weight: 600; padding: 6px 10px; }
+  .hint { padding: 12px; color: var(--dim); font-size: 13px; }
+  .own { margin-top: 14px; color: var(--sub); font-size: 14px; }
+  .own button { color: var(--sub); text-decoration: underline; text-underline-offset: 3px; }
+
+  @media (max-width: 560px) {
+    main { padding: 18px 14px 40px; }
+    .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .now .logo { width: 60px; height: 60px; }
+    #manage header { flex-direction: column; align-items: stretch; gap: 14px; }
+    .save { justify-content: space-between; }
+    .item { gap: 10px; padding: 9px 10px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <section id="control">
+    <header>
+      <div><h1>Web Radio</h1><div class="ha" id="ha"></div></div>
+      <a href="#sender">Sender verwalten ›</a>
+    </header>
+    <div class="now">
+      <div id="now-logo"></div>
+      <div class="text"><div class="name" id="now-name">…</div><div class="info" id="now-info"></div></div>
+      <button class="toggle" id="toggle"></button>
+    </div>
+    <div class="volume">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 8a5 5 0 0 1 0 8M17.7 5a9 9 0 0 1 0 14M6 15H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h2l3.5-4.5A.8.8 0 0 1 11 5v14a.8.8 0 0 1-1.5.5L6 15"/></svg>
+      <input type="range" id="volume" min="0" max="100" value="0">
+      <span class="value" id="volume-value"></span>
+    </div>
+    <div class="section">Sender</div>
+    <ul class="grid" id="grid"></ul>
+  </section>
+
+  <section id="manage" hidden>
+    <a class="back" href="#">‹ Steuerung</a>
+    <header>
+      <h1>Sender verwalten</h1>
+      <div class="save">
+        <span class="state" id="state"></span>
+        <button class="primary" id="save" disabled>Aufs Radio übertragen</button>
+      </div>
+    </header>
+    <div class="search">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="m21 21-6-6"/></svg>
+      <input id="q" placeholder="Sender suchen und hinzufügen …" autocomplete="off">
+      <ul class="results" id="results"></ul>
+    </div>
+    <div class="section"><span>Ziehen zum Sortieren · Name anklicken zum Umbenennen</span><span id="count"></span></div>
+    <ul class="list" id="list"></ul>
+    <div class="own">Stream nicht gefunden? <button id="own">Eigene Adresse eintragen</button></div>
+  </section>
+</main>
+
+<script>
+// API of the radio (see radio_web.h). The station list is plain text:
+// one "name<TAB>stream-url<TAB>logo-url" line per station.
+const MAX_BYTES = 6100;                       // the radio stores 6144 bytes
+const CODECS = ['MP3', 'OPUS', 'FLAC'];       // what the radio can decode
+const RB = 'https://de1.api.radio-browser.info/json/stations';
+
+const ICON = {
+  play: '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+  stop: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+  grip: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
+  remove: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+};
+
+let stations = [];     // {name, url, logo}
+let status = {station: 0, playing: false, ma: false, volume: 0, muted: false, ha: false};
+let dirty = false;     // unsaved changes in the manage view
+let found = [];        // last search results
+let volumeBusy = 0;    // time of the last slider movement
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const clean = s => (s || '').replace(/[\t\r\n]+/g, ' ').trim();
+const host = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
+const initials = n => n.split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+const logo = s => `<div class="logo">${esc(initials(s.name))}${
+  s.logo ? `<img src="${esc(s.logo)}" alt="" onerror="this.remove()">` : ''}</div>`;
+const post = (path, body = '') => fetch(path, {method: 'POST', headers: {'Content-Type': 'text/plain'}, body: String(body)});
+const toText = () => stations.map(s => [s.name, s.url, s.logo].map(clean).join('\t')).join('\n') + '\n';
+
+// ---------- Loading ----------
+
+async function loadStations() {
+  const text = await (await fetch('/api/stations')).text();
+  stations = text.split('\n').filter(l => l.includes('\t')).map(l => {
+    const [name, url, logoUrl] = l.split('\t');
+    return {name, url, logo: logoUrl || ''};
+  });
+  dirty = false;
+  renderAll();
+  fillLogos();
+}
+
+async function poll() {
+  try {
+    status = await (await fetch('/api/status')).json();
+    renderControl();
+  } catch { $('now-info').textContent = 'Radio nicht erreichbar'; }
+}
+
+// Look up logos for stations without one, by stream URL first, then by name.
+// Found logos are shown and saved with the next transfer.
+async function fillLogos() {
+  const norm = x => x.toLowerCase().replace(/[^a-z0-9]/g, '');
+  for (const s of stations.filter(s => !s.logo)) {
+    try {
+      let hits = await (await fetch(`${RB}/byurl?url=${encodeURIComponent(s.url)}`)).json();
+      if (!hits.some(h => h.favicon)) {
+        const params = new URLSearchParams({name: s.name, limit: 5, order: 'votes', reverse: true});
+        hits = await (await fetch(`${RB}/search?${params}`)).json();
+      }
+      // One stream URL can be listed under several stations: prefer a matching name.
+      const hit = hits.find(h => h.favicon && norm(h.name).includes(norm(s.name))) || hits.find(h => h.favicon);
+      if (hit) { s.logo = hit.favicon; renderAll(); }
+    } catch { /* keep the initials */ }
+  }
+}
+
+// ---------- Control view ----------
+
+function renderControl() {
+  const s = stations[status.station];
+  let name = s ? s.name : 'Kein Sender', info = 'Gestoppt', on = false, current = s;
+  if (status.playing) { info = 'Läuft'; on = true; }
+  else if (status.ma) { name = 'Music Assistant'; info = 'Spielt'; on = true; current = {name: 'Music Assistant'}; }
+  $('ha').textContent = status.ha ? 'Home Assistant verbunden' : 'Home Assistant nicht verbunden';
+  $('now-logo').innerHTML = current ? logo(current) : logo({name: '–'});
+  $('now-name').textContent = name;
+  $('now-info').textContent = info;
+  $('now-info').className = on ? 'info on' : 'info';
+  $('toggle').innerHTML = on ? ICON.stop : ICON.play;
+  $('toggle').title = on ? 'Stopp' : 'Abspielen';
+  if (Date.now() - volumeBusy > 1500) $('volume').value = status.volume;
+  $('volume-value').textContent = status.muted ? 'Stumm' : $('volume').value;
+  $('grid').innerHTML = stations.map((st, i) => `<li>
+    <button class="tile${status.playing && i === status.station ? ' on' : ''}" data-play="${i}">
+      ${logo(st)}<div class="name">${esc(st.name)}</div></button></li>`).join('');
+}
+
+$('grid').onclick = e => {
+  const t = e.target.closest('[data-play]');
+  if (!t) return;
+  status.station = +t.dataset.play;
+  status.playing = true;
+  renderControl();
+  post('/api/play', t.dataset.play).then(() => setTimeout(poll, 1500));
+};
+
+$('toggle').onclick = () => {
+  const stop = status.playing || status.ma;
+  (stop ? post('/api/stop') : post('/api/play', status.station)).then(() => setTimeout(poll, 1500));
+};
+
+// Send the volume while dragging, at most every 200 ms.
+let volumeTimer;
+$('volume').oninput = () => {
+  volumeBusy = Date.now();
+  $('volume-value').textContent = $('volume').value;
+  if (!volumeTimer) volumeTimer = setTimeout(() => { volumeTimer = null; post('/api/volume', $('volume').value); }, 200);
+};
+
+// ---------- Manage view ----------
+
+function setState(text, error = false) {
+  $('state').textContent = text;
+  $('state').className = error ? 'state error' : 'state';
+}
+
+function renderManage() {
+  $('list').innerHTML = stations.map((s, i) => `
+    <li class="item">
+      <span class="handle" title="Ziehen zum Sortieren">${ICON.grip}</span>
+      ${logo(s)}
+      <div class="text"><div class="name" data-rename="${i}">${esc(s.name)}</div><div class="meta">${esc(host(s.url))}</div></div>
+      <button class="icon" data-remove="${i}" title="Entfernen">${ICON.remove}</button>
+    </li>`).join('');
+  $('count').textContent = `${stations.length} Sender`;
+  const tooBig = new TextEncoder().encode(toText()).length > MAX_BYTES;
+  if (tooBig) setState('Zu viele Sender für den Speicher', true);
+  else setState(dirty ? 'Nicht übertragen' : 'Alles gespeichert');
+  $('save').disabled = !dirty || tooBig || stations.length === 0;
+}
+
+function renderAll() { renderControl(); renderManage(); }
+function changed() { dirty = true; renderManage(); }
+
+$('save').onclick = async () => {
+  $('save').disabled = true;
+  setState('Übertrage …');
+  try {
+    const r = await post('/api/stations', toText());
+    if (!r.ok) throw new Error();
+    setTimeout(loadStations, 1500);   // the radio applies the list in its main loop
+  } catch {
+    setState('Fehler beim Übertragen', true);
+    $('save').disabled = false;
+  }
+};
+
+$('list').onclick = e => {
+  const t = e.target.closest('[data-remove],[data-rename]');
+  if (!t) return;
+  if (t.dataset.remove) {
+    stations.splice(+t.dataset.remove, 1);
+    changed();
+  } else {
+    const s = stations[+t.dataset.rename];
+    const name = clean(prompt('Name des Senders', s.name));
+    if (name && name !== s.name) { s.name = name; changed(); }
+  }
+};
+
+// Drag to sort with pointer events, so it also works on touch screens.
+$('list').addEventListener('pointerdown', e => {
+  const handle = e.target.closest('.handle');
+  if (!handle) return;
+  const row = handle.closest('.item');
+  const rows = [...$('list').children];
+  const from = rows.indexOf(row);
+  const h = row.offsetHeight;
+  const startY = e.clientY;
+  let to = from;
+  row.classList.add('dragging');
+  handle.setPointerCapture(e.pointerId);
+  const move = ev => {
+    const dy = ev.clientY - startY;
+    to = Math.max(0, Math.min(rows.length - 1, from + Math.round(dy / h)));
+    row.style.transform = `translateY(${dy}px)`;
+    rows.forEach((r, k) => {
+      if (r === row) return;
+      const shift = (k > from && k <= to) ? -h : (k < from && k >= to) ? h : 0;
+      r.style.transform = shift ? `translateY(${shift}px)` : '';
+    });
+  };
+  const up = () => {
+    handle.removeEventListener('pointermove', move);
+    handle.removeEventListener('pointerup', up);
+    if (to !== from) { stations.splice(to, 0, stations.splice(from, 1)[0]); changed(); }
+    else renderManage();
+  };
+  handle.addEventListener('pointermove', move);
+  handle.addEventListener('pointerup', up);
+});
+
+// Search radio-browser.info directly from the browser.
+let searchTimer;
+$('q').oninput = () => {
+  clearTimeout(searchTimer);
+  const term = $('q').value.trim();
+  if (term.length < 2) { $('results').innerHTML = ''; return; }
+  searchTimer = setTimeout(async () => {
+    try {
+      const params = new URLSearchParams({name: term, limit: 12, hidebroken: true, order: 'votes', reverse: true});
+      found = await (await fetch(`${RB}/search?${params}`)).json();
+    } catch {
+      $('results').innerHTML = '<li class="hint">Suche nicht erreichbar</li>';
+      return;
+    }
+    $('results').innerHTML = found.length ? found.map((f, i) => {
+      const codec = (f.codec || '?').toUpperCase();
+      const ok = CODECS.includes(codec);
+      const meta = [f.country, codec, f.bitrate ? `${f.bitrate} kbit/s` : ''].filter(Boolean).join(' · ');
+      return `<li class="result${ok ? '' : ' off'}">
+        ${logo({name: f.name, logo: f.favicon})}
+        <div class="text"><div class="name">${esc(f.name.trim())}</div>
+          <div class="meta">${ok ? esc(meta) : `${esc(codec)} spielt das Radio nicht`}</div></div>
+        ${ok ? `<button class="add" data-add="${i}">Hinzufügen</button>` : ''}
+      </li>`;
+    }).join('') : '<li class="hint">Nichts gefunden</li>';
+  }, 300);
+};
+
+$('results').onclick = e => {
+  const b = e.target.closest('[data-add]');
+  if (!b) return;
+  const f = found[+b.dataset.add];
+  stations.push({name: clean(f.name), url: f.url_resolved || f.url, logo: f.favicon || ''});
+  $('q').value = '';
+  $('results').innerHTML = '';
+  changed();
+};
+
+$('own').onclick = () => {
+  const url = clean(prompt('Stream-Adresse (http… oder https…)'));
+  if (!/^https?:\/\//.test(url)) return;
+  const name = clean(prompt('Name des Senders', host(url)));
+  if (name) { stations.push({name, url, logo: ''}); changed(); }
+};
+
+// ---------- Views ----------
+
+function showView() {
+  const manage = location.hash === '#sender';
+  if (!manage && dirty) {
+    if (!confirm('Nicht übertragene Änderungen verwerfen?')) { location.hash = '#sender'; return; }
+    loadStations();
+  }
+  $('manage').hidden = !manage;
+  $('control').hidden = manage;
+  if (!manage) poll();
+}
+
+window.onhashchange = showView;
+window.onbeforeunload = () => dirty ? true : undefined;
+setInterval(() => { if (!$('control').hidden && !document.hidden) poll(); }, 3000);
+loadStations().then(showView).catch(() => { $('now-info').textContent = 'Radio nicht erreichbar'; });
+</script>
+</body>
+</html>
