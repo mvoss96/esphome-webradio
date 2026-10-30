@@ -55,8 +55,8 @@ Per-device settings go under `substitutions:` in the device file:
 
 | Screen | Turn | Click | Hold |
 |--------|------|-------|------|
-| Clock | Volume | Play the last station | Mute |
-| Now playing | Volume | Station list (Music Assistant: pause) | Mute |
+| Clock | Volume | Play the last station | – |
+| Now playing | Volume | Station list (Music Assistant: pause) | Stop |
 | Menus | Move | Select / edit | Back |
 
 While the display is dimmed, the first input only wakes it. The dim time is a setting in the

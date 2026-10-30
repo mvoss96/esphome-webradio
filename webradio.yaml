@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.7.4"
+    version: "1.7.5"
   on_boot:
     priority: -100
     then:
@@ -120,11 +120,6 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
-
-  - id: volume_before_mute
-    type: float
-    restore_value: true
-    initial_value: '0.5'
 
   # Knob steps not yet applied to the volume, see apply_volume.
   - id: volume_steps
@@ -1148,7 +1143,7 @@ script:
                                   then:
                                     - script.execute: menu_back
 
-  # Hold: mute on clock and playing screen, one level back in menus.
+  # Hold: stop playback on the clock and playing screen, one level back in menus.
   - id: knob_hold
     then:
       - if:
@@ -1164,18 +1159,11 @@ script:
                 then:
                   - if:
                       condition:
-                        lambda: "return id(media_player_sendspin).volume == 0.0f;"
+                        or:
+                          - media_player.is_playing: media_player_sendspin
+                          - media_player.is_paused: media_player_sendspin
                       then:
-                        - media_player.volume_set:
-                            id: media_player_sendspin
-                            volume: !lambda "return id(volume_before_mute);"
-                      else:
-                        - globals.set:
-                            id: volume_before_mute
-                            value: !lambda "return id(media_player_sendspin).volume;"
-                        - media_player.volume_set:
-                            id: media_player_sendspin
-                            volume: 0.0
+                        - media_player.stop: media_player_sendspin
                 else:
                   - if:
                       condition:
@@ -1185,7 +1173,7 @@ script:
 
   ######## Display ########
 
-  # Full brightness on any input; the clock dims to 30 % after 15 s.
+  # Full brightness on any input; dims to 30 % after "Display abdunkeln nach" seconds.
   - id: display_wake
     mode: restart
     then:
