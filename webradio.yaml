@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.7.3"
+    version: "1.7.4"
   on_boot:
     priority: -100
     then:
@@ -268,9 +268,12 @@ ota:
       - light.turn_on:
           id: tft_backlight
           brightness: 100%
-      # The light applies new values in the main loop, which stalls during the upload,
-      # so set the PWM output directly as well.
-      - lambda: id(output_blk).set_level(1.0f);
+      # The main loop stalls during the upload, so the light and the media player stop
+      # would only take effect afterwards. Set the backlight output and mute the I2S
+      # speaker directly; the speaker applies its mute in its own task.
+      - lambda: |-
+          id(output_blk).set_level(1.0f);
+          id(i2s_speaker).set_mute_state(true);
       - lvgl.page.show: ota_page
       - lambda: lv_task_handler();
       - delay: 300ms
@@ -286,6 +289,7 @@ ota:
           id: lbl_ota_title
           text: "Fertig"
     on_error:
+      - lambda: id(i2s_speaker).set_mute_state(false);
       - lvgl.label.update:
           id: lbl_ota_title
           text: "Update fehlgeschlagen"
