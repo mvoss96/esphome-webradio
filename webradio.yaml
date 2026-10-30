@@ -8,7 +8,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.7.1"
+    version: "1.7.2"
   on_boot:
     priority: -100
     then:
@@ -859,13 +859,11 @@ script:
           switch (id(menu)) {
             case 0: {
               title = "Menü";
-              const std::string radio_sub =
-                  playing ? names[idx] + " läuft" : std::to_string(names.size()) + " Sender";
+              // Main menu tiles show only their name.
               items.push_back(back());
-              items.push_back(icon(ICON_RADIO, "Radio", radio_sub));
-              items.push_back(icon(ICON_SETTINGS, "Einstellungen",
-                                   "Bass " + gain_text(id(eq_bass).state) + "  ·  Höhen " + gain_text(id(eq_treble).state)));
-              items.push_back(icon(ICON_INFO, "Info", "WLAN, IP, Firmware"));
+              items.push_back(icon(ICON_RADIO, "Radio", ""));
+              items.push_back(icon(ICON_SETTINGS, "Einstellungen", ""));
+              items.push_back(icon(ICON_INFO, "Info", ""));
               break;
             }
             case 1: {
