@@ -9,14 +9,13 @@ static void hide(lv_obj_t *o) { lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN); }
 static void show(lv_obj_t *o) { lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN); }
 static lv_color_t col(uint32_t hex) { return lv_color_hex(hex); }
 
-// Accent outline around a logo box, drawn outside the box. The slot root lets it overflow;
-// outlines are drawn directly, without a layer buffer.
+// Accent border inside a logo box, drawn after the logo image (border_post). It stays within
+// the box, which LVGL redraws as a whole; an outline outside the box was redrawn only in parts.
 static void mark_playing(const Slot &s, bool playing) {
-  lv_obj_add_flag(s.root, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
-  lv_obj_set_style_outline_width(s.logo_box, playing ? 2 : 0, 0);
-  lv_obj_set_style_outline_pad(s.logo_box, 1, 0);
-  lv_obj_set_style_outline_color(s.logo_box, col(ACCENT), 0);
-  lv_obj_set_style_outline_opa(s.logo_box, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(s.logo_box, playing ? 2 : 0, 0);
+  lv_obj_set_style_border_color(s.logo_box, col(ACCENT), 0);
+  lv_obj_set_style_border_opa(s.logo_box, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_post(s.logo_box, true, 0);
 }
 
 void style_gauge(lv_obj_t *arc, int width) {

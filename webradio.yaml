@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.8.3"
+    version: "1.8.4"
   on_boot:
     priority: -100
     then:
@@ -277,6 +277,7 @@ interval:
             lambda: "return id(logos)->take_changed();"
           then:
             - script.execute: refresh_logos
+      - script.execute: check_source
 
 ota:
   - platform: esphome
@@ -476,27 +477,7 @@ media_player:
         - sendspin_source
         - http_source
     on_state:
-      - if:
-          condition:
-            lambda: |-
-              if (id(media_player_sendspin).state != media_player::MEDIA_PLAYER_STATE_PLAYING)
-                return false;
-              const bool radio = id(http_source)->get_state() == media_source::MediaSourceState::PLAYING;
-              if (radio == id(radio_active))
-                return false;
-              id(radio_active) = radio;
-              return true;
-          then:
-            - if:
-                condition:
-                  lambda: "return id(ui_page) <= 1;"
-                then:
-                  - script.execute: show_playing
-            - if:
-                condition:
-                  lambda: "return id(ui_page) == 2 && id(menu) == 0;"
-                then:
-                  - script.execute: render_menu
+      - script.execute: check_source
     on_play:
       - script.stop: idle_timeout
       - lvgl.widget.hide: pause_overlay
@@ -808,6 +789,38 @@ script:
                       level: WARN
                       format: "No station at index %d"
                       args: [idx]
+
+  # Set radio_active from the source that plays. Music Assistant wins: while the Sendspin
+  # source plays or is paused it is Music Assistant, else the radio if the HTTP source plays.
+  # In between nothing changes. Redraws the playing screen or the main menu on a change.
+  - id: check_source
+    then:
+      - if:
+          condition:
+            lambda: |-
+              const auto ss = id(sendspin_source)->get_state();
+              bool radio;
+              if (ss == media_source::MediaSourceState::PLAYING || ss == media_source::MediaSourceState::PAUSED)
+                radio = false;
+              else if (id(http_source)->get_state() == media_source::MediaSourceState::PLAYING)
+                radio = true;
+              else
+                return false;
+              if (radio == id(radio_active))
+                return false;
+              id(radio_active) = radio;
+              return true;
+          then:
+            - if:
+                condition:
+                  lambda: "return id(ui_page) <= 1;"
+                then:
+                  - script.execute: show_playing
+            - if:
+                condition:
+                  lambda: "return id(ui_page) == 2 && id(menu) == 0;"
+                then:
+                  - script.execute: render_menu
 
   ######## Navigation ########
 
