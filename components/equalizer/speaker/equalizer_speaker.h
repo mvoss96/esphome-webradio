@@ -123,6 +123,12 @@ class EqualizerSpeaker : public Component, public speaker::Speaker {
   std::vector<float> float_scratch_;
   std::vector<int16_t> int16_scratch_;
 
+  // Filtered bytes in int16_scratch_ that the output speaker has not accepted yet, from
+  // pending_offset_ on. play() sends them before it filters new input, so no frame passes
+  // the filters twice.
+  size_t pending_offset_{0};
+  size_t pending_bytes_{0};
+
   uint32_t state_start_ms_{0};
 };
 
