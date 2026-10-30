@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.8.4"
+    version: "1.9.0-airplay"
   on_boot:
     priority: -100
     then:
@@ -166,6 +166,12 @@ globals:
     initial_value: '0'
 
   # True while a station from the list plays, false for Music Assistant.
+  # AirPlay plays (set by check_source); radio_active is false then.
+  - id: airplay_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
   - id: radio_active
     type: bool
     restore_value: false
@@ -465,6 +471,10 @@ media_source:
     buffer_size: 300000
   - platform: audio_http
     id: http_source
+  - platform: airplay
+    id: airplay_source
+    name: Web Radio
+    task_stack_in_psram: true
 
 media_player:
   - platform: speaker_source
@@ -476,6 +486,7 @@ media_player:
       sources:
         - sendspin_source
         - http_source
+        - airplay_source
     on_state:
       - script.execute: check_source
     on_play:
@@ -606,6 +617,21 @@ binary_sensor:
           - script.execute: knob_hold
 
 text_sensor:
+  - platform: airplay
+    airplay_id: airplay_source
+    title:
+      id: airplay_title
+      internal: true
+      on_value:
+        - if:
+            condition:
+              lambda: "return id(airplay_active) && id(ui_page) == 1;"
+            then:
+              - script.execute: update_playing_layout
+    artist:
+      id: airplay_artist
+      internal: true
+
   # Name of the station playing from the list, for Home Assistant.
   - platform: template
     name: "Sender"
@@ -798,17 +824,22 @@ script:
       - if:
           condition:
             lambda: |-
+              using S = media_source::MediaSourceState;
+              const auto as = id(airplay_source)->get_state();
               const auto ss = id(sendspin_source)->get_state();
-              bool radio;
-              if (ss == media_source::MediaSourceState::PLAYING || ss == media_source::MediaSourceState::PAUSED)
+              bool radio = false, airplay = false;
+              if (as == S::PLAYING || as == S::PAUSED)
+                airplay = true;
+              else if (ss == S::PLAYING || ss == S::PAUSED)
                 radio = false;
-              else if (id(http_source)->get_state() == media_source::MediaSourceState::PLAYING)
+              else if (id(http_source)->get_state() == S::PLAYING)
                 radio = true;
               else
                 return false;
-              if (radio == id(radio_active))
+              if (radio == id(radio_active) && airplay == id(airplay_active))
                 return false;
               id(radio_active) = radio;
+              id(airplay_active) = airplay;
               return true;
           then:
             - if:
@@ -870,6 +901,15 @@ script:
             lv_obj_add_flag(id(cover_box), LV_OBJ_FLAG_HIDDEN);
             esphome::station_logos::show_logo(id(radio_logo_box), id(radio_logo_img), id(radio_logo_lbl),
                                               id(logos)->big(idx), name);
+          } else if (id(airplay_active)) {
+            name = clean(id(airplay_title).state);
+            sub = clean(id(airplay_artist).state);
+            if (name.empty()) name = "AirPlay";
+            lv_label_set_text(id(lbl_source), "AirPlay");
+            lv_obj_add_flag(id(radio_logo_box), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(id(cover_box), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(id(cover_art), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(id(cover_placeholder), LV_OBJ_FLAG_HIDDEN);
           } else {
             name = clean(id(sendspin_title).state);
             sub = clean(id(sendspin_artist).state);
@@ -969,6 +1009,9 @@ script:
                 i.station = idx;
                 i.label = names[idx];
                 i.playing = true;
+                items.push_back(i);
+              } else if (id(airplay_active) && id(is_now_playing)) {
+                Item i = icon(ICON_MUSIC, "AirPlay", "");
                 items.push_back(i);
               } else if (!id(radio_active) && id(is_now_playing)) {
                 Item i;
@@ -1544,7 +1587,7 @@ font:
   # settings, music, pause.
   - {file: {type: web, url: '${tabler_font}'}, id: ti16, size: 16, bpp: 4, glyphs: ["", ""]}
   - {file: {type: web, url: '${tabler_font}'}, id: ti20, size: 20, bpp: 4,
-     glyphs: ["", "", "", "", ""]}
+     glyphs: ["", "", "", "", "", ""]}
   - {file: {type: web, url: '${tabler_font}'}, id: ti22, size: 22, bpp: 4, glyphs: [""]}
   - {file: {type: web, url: '${tabler_font}'}, id: ti34, size: 34, bpp: 4,
      glyphs: ["", "", "", "", "", ""]}

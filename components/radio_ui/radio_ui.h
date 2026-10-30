@@ -22,6 +22,7 @@ static const char *const ICON_TUNE = "";
 static const char *const ICON_INFO = "";
 static const char *const ICON_RADIO = "";
 static const char *const ICON_SETTINGS = "";
+static const char *const ICON_MUSIC = "";
 static const char *const ICON_WIFI = "";
 static const char *const ICON_SIGNAL = "";
 static const char *const ICON_NETWORK = "";
