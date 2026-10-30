@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.8.1"
+    version: "1.8.2"
   on_boot:
     priority: -100
     then:
@@ -525,6 +525,12 @@ media_player:
             lambda: "return id(ui_page) == 1;"
           then:
             - script.execute: idle_timeout
+      # The first main menu tile follows what plays.
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 2 && id(menu) == 0;"
+          then:
+            - script.execute: render_menu
     on_volume:
       # A volume above zero ends a mute from Home Assistant or Music Assistant; the
       # player keeps the mute flag separately and restores it after a reboot.
@@ -935,8 +941,24 @@ script:
           switch (id(menu)) {
             case 0: {
               title = "Menü";
-              // Main menu tiles show only their name.
-              items.push_back(back());
+              // Main menu tiles show only their name. The first tile leads back to what plays:
+              // the station, Music Assistant, or the clock (Zurück).
+              if (playing) {
+                Item i;
+                i.kind = Item::STATION;
+                i.station = idx;
+                i.label = names[idx];
+                items.push_back(i);
+              } else if (!id(radio_active) && id(is_now_playing)) {
+                Item i;
+                i.kind = Item::IMAGE;
+                i.label = "Music Assistant";
+                i.image = id(ma_logo)->get_lv_image_dsc();
+                i.image_small = id(ma_logo_small)->get_lv_image_dsc();
+                items.push_back(i);
+              } else {
+                items.push_back(back());
+              }
               items.push_back(icon(ICON_RADIO, "Radio", ""));
               items.push_back(icon(ICON_SETTINGS, "Einstellungen", ""));
               items.push_back(icon(ICON_INFO, "Info", ""));
@@ -1270,8 +1292,9 @@ script:
                   lambda: "return id(ui_page) == 0;"
                 then:
                   - script.execute:
-                      id: play_station
-                      idx: !lambda "return id(station_index);"
+                      id: open_menu
+                      m: 0
+                      s: 1
                 else:
                   - if:
                       condition:
@@ -1279,8 +1302,8 @@ script:
                       then:
                         - script.execute:
                             id: open_menu
-                            m: 1
-                            s: !lambda "return id(radio_active) ? id(station_index) + 1 : 1;"
+                            m: !lambda "return id(radio_active) ? 1 : 0;"
+                            s: !lambda "return id(radio_active) ? id(station_index) + 1 : 0;"
                       else:
                         - if:
                             condition:
@@ -1300,7 +1323,7 @@ script:
                                   then:
                                     - script.execute: eq_click
 
-  # Hold: stop playback on the clock and playing screen, one level back in menus.
+  # Hold: stop playback on the clock and playing screen and open the main menu; one level back in menus.
   - id: knob_hold
     then:
       - if:
@@ -1321,6 +1344,10 @@ script:
                           - media_player.is_paused: media_player_sendspin
                       then:
                         - media_player.stop: media_player_sendspin
+                        - script.execute:
+                            id: open_menu
+                            m: 0
+                            s: 1
                 else:
                   - if:
                       condition:
@@ -1433,6 +1460,19 @@ display:
     reset_pin: GPIO08
 
 image:
+  # Music Assistant icon (Home Assistant brands) for the main menu tile.
+  - platform: file
+    file: https://brands.home-assistant.io/music_assistant/icon@2x.png
+    id: ma_logo
+    resize: 56x56
+    type: RGB565
+    transparency: alpha_channel
+  - platform: file
+    file: https://brands.home-assistant.io/music_assistant/icon@2x.png
+    id: ma_logo_small
+    resize: 32x32
+    type: RGB565
+    transparency: alpha_channel
   - platform: sendspin
     id: sendspin_cover_slot
     format: JPEG

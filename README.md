@@ -55,10 +55,13 @@ Per-device settings go under `substitutions:` in the device file:
 
 | Screen | Turn | Click | Hold |
 |--------|------|-------|------|
-| Clock | Volume | Play the last station | – |
-| Now playing | Volume | Station list | Stop |
+| Clock | Volume | Main menu | – |
+| Now playing | Volume | Radio: station list; Music Assistant: main menu | Stop, then main menu |
 | Menus | Move | Select / edit | Back |
 | Equalizer | Select band / change it | Edit on/off | Back |
+
+The first main menu tile shows what plays (the station or Music Assistant) and leads back to
+it; with nothing playing it is "Zurück" to the clock.
 
 The equalizer page (settings menu → Equalizer) shows bass, mid and treble as sliders.
 

@@ -86,6 +86,16 @@ static void render_slot(const Slot &s, const Item *it, bool center, bool editing
       show(s.logo_box);
       const lv_image_dsc_t *logo = center ? logos->big(it->station) : logos->small(it->station);
       station_logos::show_logo(s.logo_box, s.logo_img, s.logo_lbl, logo, names[it->station], !center);
+      lv_obj_set_style_image_opa(s.logo_img, LV_OPA_COVER, 0);
+      break;
+    }
+    case Item::IMAGE: {
+      // Station logos come pre-dimmed for side tiles; a plain image is dimmed by its opacity,
+      // which LVGL blends per pixel without a layer buffer.
+      show(s.logo_box);
+      station_logos::show_logo(s.logo_box, s.logo_img, s.logo_lbl, center ? it->image : it->image_small,
+                               it->label, !center);
+      lv_obj_set_style_image_opa(s.logo_img, center ? LV_OPA_COVER : LV_OPA_60, 0);
       break;
     }
     case Item::BACK:

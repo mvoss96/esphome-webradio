@@ -31,7 +31,7 @@ static const char *const ICON_MUTE = "";
 
 /// One tile of a carousel.
 struct Item {
-  enum Kind { BACK, ICON, STATION, GAUGE };
+  enum Kind { BACK, ICON, STATION, GAUGE, IMAGE };
   Kind kind{ICON};
   const char *icon{""};
   std::string label;
@@ -39,6 +39,8 @@ struct Item {
   int station{-1};  // index into the station list for STATION
   float value{0}, lo{0}, hi{1};  // GAUGE range in dB
   std::string value_text;        // GAUGE: shown instead of the dB value when set
+  const lv_image_dsc_t *image{nullptr};        // IMAGE: centre tile, 56 px
+  const lv_image_dsc_t *image_small{nullptr};  // IMAGE: side tile, 32 px
 };
 
 /// Steps of the "dim after" setting in seconds; 0 = never.
