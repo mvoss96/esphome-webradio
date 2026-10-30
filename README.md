@@ -4,7 +4,7 @@ Firmware for a small internet radio built on ESPHome: an ESP32-S3 with a MAX9835
 an ST7735 160×128 display and a rotary encoder with push button.
 
 - Internet radio from a station list stored on the device (MP3, Opus and FLAC streams).
-- Music Assistant playback through Sendspin.
+- Sendspin playback, for example from Music Assistant.
 - Display UI built with LVGL: clock, now playing, station carousel with logos, settings, info.
 - Web page on the device for playback control and for adding, renaming and sorting stations.
 - Works without Home Assistant. Home Assistant is optional and only adds entities and actions.
@@ -56,12 +56,12 @@ Per-device settings go under `substitutions:` in the device file:
 | Screen | Turn | Click | Hold |
 |--------|------|-------|------|
 | Clock | Volume | Main menu | – |
-| Now playing | Volume | Radio: station list; Music Assistant: main menu | Stop, then main menu |
+| Now playing | Volume | Radio: station list; Sendspin: main menu | Stop, then main menu |
 | Main menu | Move | Select | Stop playback (back to the clock when nothing plays) |
 | Other menus | Move | Select / edit | Back |
 | Equalizer | Select band / change it | Edit on/off | Back |
 
-The first main menu tile shows what plays (the station or Music Assistant) and leads back to
+The first main menu tile shows what plays (the station or Sendspin) and leads back to
 it; with nothing playing it is "Zurück" to the clock.
 
 The equalizer page (settings menu → Equalizer) shows bass, mid and treble as sliders.
@@ -80,7 +80,7 @@ API used by the page:
 
 | Request | Body / response |
 |---------|-----------------|
-| `GET /api/status` | JSON: `station`, `playing`, `ma`, `volume`, `muted`, `ha`, `bass`, `mid`, `treble`, `dim` |
+| `GET /api/status` | JSON: `station`, `playing`, `sendspin`, `volume`, `muted`, `ha`, `bass`, `mid`, `treble`, `dim` |
 | `GET /api/stations` | one `name<TAB>stream-url<TAB>logo-url` line per station |
 | `POST /api/stations` | same text format; replaces the list |
 | `POST /api/play` | station index |

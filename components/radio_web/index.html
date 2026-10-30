@@ -183,7 +183,7 @@ const ICON = {
 };
 
 let stations = [];     // {name, url, logo}
-let status = {station: 0, playing: false, ma: false, volume: 0, muted: false, ha: false,
+let status = {station: 0, playing: false, sendspin: false, volume: 0, muted: false, ha: false,
               bass: 6, mid: 0, treble: 0, dim: 15};
 let dirty = false;     // unsaved changes in the manage view
 let found = [];        // last search results
@@ -244,7 +244,7 @@ function renderControl() {
   const s = stations[status.station];
   let name = s ? s.name : 'Kein Sender', info = 'Gestoppt', on = false, current = s;
   if (status.playing) { info = 'Läuft'; on = true; }
-  else if (status.ma) { name = 'Music Assistant'; info = 'Spielt'; on = true; current = {name: 'Music Assistant'}; }
+  else if (status.sendspin) { name = 'Sendspin'; info = 'Spielt'; on = true; current = {name: 'Sendspin'}; }
   $('ha').textContent = status.ha ? 'Home Assistant verbunden' : 'Home Assistant nicht verbunden';
   $('now-logo').innerHTML = current ? logo(current) : logo({name: '–'});
   $('now-name').textContent = name;
@@ -269,7 +269,7 @@ $('grid').onclick = e => {
 };
 
 $('toggle').onclick = () => {
-  const stop = status.playing || status.ma;
+  const stop = status.playing || status.sendspin;
   (stop ? post('/api/stop') : post('/api/play', status.station)).then(() => setTimeout(poll, 1500));
 };
 

@@ -100,24 +100,19 @@ static void render_slot(const Slot &s, const Item *it, bool center, bool editing
       mark_playing(s, it->playing);
       break;
     }
-    case Item::IMAGE: {
-      // Station logos come pre-dimmed for side tiles; a plain image is dimmed by its opacity,
-      // which LVGL blends per pixel without a layer buffer.
-      show(s.logo_box);
-      station_logos::show_logo(s.logo_box, s.logo_img, s.logo_lbl, center ? it->image : it->image_small,
-                               it->label, !center);
-      // The image is smaller than the tile and sits centred on a tile background.
-      lv_obj_set_style_bg_opa(s.logo_box, LV_OPA_COVER, 0);
-      lv_obj_set_style_bg_color(s.logo_box, col(center ? 0x26262E : 0x17171C), 0);
-      lv_obj_align(s.logo_img, LV_ALIGN_CENTER, 0, 0);
-      lv_obj_set_style_image_opa(s.logo_img, center ? LV_OPA_COVER : LV_OPA_60, 0);
-      mark_playing(s, it->playing);
-      break;
-    }
     case Item::BACK:
     case Item::ICON: {
       show(s.icon);
       lv_label_set_text(s.icon, it->icon);
+      if (it->playing) {
+        // The playing source: the icon sits on a tile background with the accent border.
+        show(s.logo_box);
+        hide(s.logo_img);
+        hide(s.logo_lbl);
+        lv_obj_set_style_bg_opa(s.logo_box, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(s.logo_box, col(center ? 0x26262E : 0x17171C), 0);
+        mark_playing(s, true);
+      }
       uint32_t c = center ? (it->kind == Item::BACK ? SUB : TEXT) : DIM;
       lv_obj_set_style_text_color(s.icon, col(c), 0);
       break;

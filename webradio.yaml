@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.8.4"
+    version: "1.8.5"
   on_boot:
     priority: -100
     then:
@@ -71,7 +71,7 @@ radio_web:
     auto *player = id(media_player_sendspin);
     char buf[224];
     snprintf(buf, sizeof(buf),
-             "{\"station\":%d,\"playing\":%s,\"ma\":%s,\"volume\":%d,\"muted\":%s,\"ha\":%s,"
+             "{\"station\":%d,\"playing\":%s,\"sendspin\":%s,\"volume\":%d,\"muted\":%s,\"ha\":%s,"
              "\"bass\":%.1f,\"mid\":%.1f,\"treble\":%.1f,\"dim\":%d}",
              id(station_index), id(radio_active) && id(is_now_playing) ? "true" : "false",
              !id(radio_active) && id(is_now_playing) ? "true" : "false",
@@ -165,7 +165,7 @@ globals:
     restore_value: true
     initial_value: '0'
 
-  # True while a station from the list plays, false for Music Assistant.
+  # True while a station from the list plays, false for Sendspin.
   - id: radio_active
     type: bool
     restore_value: false
@@ -790,8 +790,8 @@ script:
                       format: "No station at index %d"
                       args: [idx]
 
-  # Set radio_active from the source that plays. Music Assistant wins: while the Sendspin
-  # source plays or is paused it is Music Assistant, else the radio if the HTTP source plays.
+  # Set radio_active from the source that plays. Sendspin wins: while the Sendspin source
+  # plays or is paused it is Sendspin, else the radio if the HTTP source plays.
   # In between nothing changes. Redraws the playing screen or the main menu on a change.
   - id: check_source
     then:
@@ -846,7 +846,7 @@ script:
       - lvgl.page.show: now_playing_page
       - script.execute: display_wake
 
-  # Radio: station logo, name, "Live". Music Assistant: cover, title, artist.
+  # Radio: station logo, name, "Live". Sendspin: cover, title, artist.
   - id: update_playing_layout
     then:
       - lambda: |-
@@ -873,7 +873,7 @@ script:
           } else {
             name = clean(id(sendspin_title).state);
             sub = clean(id(sendspin_artist).state);
-            lv_label_set_text(id(lbl_source), "Music Assistant");
+            lv_label_set_text(id(lbl_source), "Sendspin");
             lv_obj_add_flag(id(radio_logo_box), LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(id(cover_box), LV_OBJ_FLAG_HIDDEN);
           }
@@ -962,7 +962,7 @@ script:
             case 0: {
               title = "";  // the main menu needs no heading
               // Main menu tiles show only their name. The first tile leads back to what plays:
-              // the station, Music Assistant, or the clock (Zurück).
+              // the station, Sendspin, or the clock (Zurück).
               if (playing) {
                 Item i;
                 i.kind = Item::STATION;
@@ -971,11 +971,7 @@ script:
                 i.playing = true;
                 items.push_back(i);
               } else if (!id(radio_active) && id(is_now_playing)) {
-                Item i;
-                i.kind = Item::IMAGE;
-                i.label = "Music Assistant";
-                i.image = id(ma_logo)->get_lv_image_dsc();
-                i.image_small = id(ma_logo_small)->get_lv_image_dsc();
+                Item i = icon(ICON_MUSIC, "Sendspin", "");
                 i.playing = true;
                 items.push_back(i);
               } else {
@@ -1493,19 +1489,6 @@ display:
     reset_pin: GPIO08
 
 image:
-  # Music Assistant icon (Home Assistant brands) for the main menu tile.
-  - platform: file
-    file: https://brands.home-assistant.io/music_assistant/icon@2x.png
-    id: ma_logo
-    resize: 36x36
-    type: RGB565
-    transparency: alpha_channel
-  - platform: file
-    file: https://brands.home-assistant.io/music_assistant/icon@2x.png
-    id: ma_logo_small
-    resize: 20x20
-    type: RGB565
-    transparency: alpha_channel
   - platform: sendspin
     id: sendspin_cover_slot
     format: JPEG
@@ -1544,7 +1527,7 @@ font:
   # settings, music, pause.
   - {file: {type: web, url: '${tabler_font}'}, id: ti16, size: 16, bpp: 4, glyphs: ["", ""]}
   - {file: {type: web, url: '${tabler_font}'}, id: ti20, size: 20, bpp: 4,
-     glyphs: ["", "", "", "", ""]}
+     glyphs: ["", "", "", "", "", ""]}
   - {file: {type: web, url: '${tabler_font}'}, id: ti22, size: 22, bpp: 4, glyphs: [""]}
   - {file: {type: web, url: '${tabler_font}'}, id: ti34, size: 34, bpp: 4,
      glyphs: ["", "", "", "", "", ""]}
@@ -1621,7 +1604,7 @@ lvgl:
                     bg_color: 0xFFB020
                     radius: 3
 
-    # 1: Playing. Radio shows the station logo, Music Assistant the cover.
+    # 1: Playing. Radio shows the station logo, Sendspin the cover.
     - id: now_playing_page
       styles: page_style
       widgets:
