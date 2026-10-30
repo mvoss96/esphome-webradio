@@ -35,6 +35,12 @@ esphome:
 esp32:
   variant: ESP32S3
   flash_size: 8MB
+  # Storage for station logos. ESPHome shrinks the two app partitions to make room.
+  partitions:
+    - name: logos
+      type: data
+      subtype: spiffs
+      size: 0x180000
   cpu_frequency: 240MHz
   framework:
     type: esp-idf
