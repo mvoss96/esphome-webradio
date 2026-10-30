@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.9.5-airplay"
+    version: "1.9.6-airplay"
   on_boot:
     priority: -100
     then:
