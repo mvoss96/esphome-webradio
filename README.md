@@ -58,8 +58,8 @@ Per-device settings go under `substitutions:` in the device file:
 | Clock | Volume | Main menu | – |
 | Now playing | Volume | Main menu | Stop, then main menu |
 | Main menu | Move | Settings / back to what plays / play the station | Back to the clock or playing screen |
-| Settings | Move | Equalizer / edit the dim time / info | Back |
-| Equalizer | Select band / change it | Edit on/off | Back |
+| Settings | Move | Back / equalizer / edit the dim time / info | Back |
+| Equalizer | Select back arrow or band / change it | Back / edit on/off | Back |
 
 The main menu is one row: "Einstellungen" on the left, then the playing source (Sendspin) if
 any, then all stations. It opens on the playing station or source, otherwise on the last

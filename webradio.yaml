@@ -978,13 +978,16 @@ script:
               items.push_back(i);
             }
           } else {
+            Item back = icon(ICON_BACK, "Zurück", "");
+            back.kind = Item::BACK;
+            items.push_back(back);
             items.push_back(icon(ICON_TUNE, "Equalizer", ""));
             Item dim = icon(ICON_DIM, "Abdunkeln nach", "");
             dim.kind = Item::STEPS;
             dim.step = dim_step(id(dim_after).state);
             dim.step_count = DIM_STEP_COUNT;
             dim.value_text = dim_text(id(dim_after).state);
-            dim.sub = edit && sel == 1 ? "" : dim.value_text;
+            dim.sub = edit && sel == 2 ? "" : dim.value_text;
             items.push_back(dim);
             items.push_back(icon(ICON_INFO, "Info", ""));
           }
@@ -1010,7 +1013,7 @@ script:
       dir: int
     then:
       - lambda: |-
-          const int n = id(menu) == 0 ? id(menu_first) + (int) id(station_names).size() : 3;
+          const int n = id(menu) == 0 ? id(menu_first) + (int) id(station_names).size() : 4;
           id(menu_sel) = std::max(0, std::min(n - 1, id(menu_sel) + dir));
 
   # Info page: all values on one page.
@@ -1054,10 +1057,10 @@ script:
                   - script.execute:
                       id: open_menu
                       m: !lambda "return id(ui_page) == 3 ? 1 : 0;"
-                      s: !lambda "return id(ui_page) == 3 ? 2 : 0;"
+                      s: !lambda "return id(ui_page) == 3 ? 3 : 0;"
 
   # Click on a tile. Main menu: settings, back to the playing source, or play a station.
-  # Settings: equalizer page, edit the dim time, info page.
+  # Settings: back, equalizer page, edit the dim time, info page.
   - id: menu_click
     then:
       - if:
@@ -1071,7 +1074,7 @@ script:
                   - script.execute:
                       id: open_menu
                       m: 1
-                      s: 0
+                      s: 1
                 else:
                   - if:
                       condition:
@@ -1087,16 +1090,22 @@ script:
                 condition:
                   lambda: "return id(menu_sel) == 0;"
                 then:
-                  - script.execute: open_eq
+                  - script.execute: menu_back
                 else:
                   - if:
                       condition:
                         lambda: "return id(menu_sel) == 1;"
                       then:
-                        - lambda: "id(menu_edit) = !id(menu_edit);"
-                        - script.execute: render_menu
+                        - script.execute: open_eq
                       else:
-                        - script.execute: open_info
+                        - if:
+                            condition:
+                              lambda: "return id(menu_sel) == 2;"
+                            then:
+                              - lambda: "id(menu_edit) = !id(menu_edit);"
+                              - script.execute: render_menu
+                            else:
+                              - script.execute: open_info
 
   # Equalizer page (ui_page 4): bass, mid and treble as vertical sliders.
   # Turn selects a band, click switches to editing (accent colour), turn changes it.
@@ -1105,6 +1114,9 @@ script:
       - globals.set:
           id: eq_edit
           value: 'false'
+      - globals.set:
+          id: eq_sel
+          value: '0'
       - globals.set:
           id: ui_page
           value: '4'
@@ -1122,13 +1134,15 @@ script:
           lv_obj_t *knobs[3] = {id(eq_knob0), id(eq_knob1), id(eq_knob2)};
           lv_obj_t *labels[3] = {id(eq_lbl0), id(eq_lbl1), id(eq_lbl2)};
           const int top = 24, bottom = 84;  // slider track, see eq_page
-          const int sel = id(eq_sel);
+          const int sel = id(eq_sel);  // -1: back arrow
+          static const int XS[3] = {56, 98, 140};
+          lv_obj_set_style_text_color(id(eq_back_icon), lv_color_hex(sel < 0 ? TEXT : DIM), 0);
           for (int k = 0; k < 3; k++) {
             auto ypos = [&](float v) {
               const float f = (std::min(std::max(v, LO[k]), HI[k]) - LO[k]) / (HI[k] - LO[k]);
               return bottom - (int) lroundf(f * (bottom - top));
             };
-            const int cx = 40 + 40 * k, y = ypos(nums[k]->state), zero = ypos(0);
+            const int cx = XS[k], y = ypos(nums[k]->state), zero = ypos(0);
             const lv_color_t c = lv_color_hex(k == sel ? (id(eq_edit) ? ACCENT : TEXT) : DIM);
             lv_obj_set_pos(fills[k], cx - 1, std::min(y, zero));
             lv_obj_set_size(fills[k], 3, std::max(1, std::abs(y - zero)));
@@ -1138,7 +1152,7 @@ script:
             lv_obj_set_style_text_color(labels[k], lv_color_hex(k == sel ? TEXT : DIM), 0);
           }
           // The selected band is marked by its label; the line below shows only its value.
-          const std::string text = gain_text(nums[sel]->state) + " dB";
+          const std::string text = sel < 0 ? std::string("Zurück") : gain_text(nums[sel]->state) + " dB";
           lv_label_set_text(id(eq_value), text.c_str());
           lv_obj_set_style_text_color(id(eq_value), lv_color_hex(id(eq_edit) ? ACCENT : TEXT), 0);
 
@@ -1154,16 +1168,23 @@ script:
             call.set_value(num->state + 0.5f * dir);
             call.perform();
           } else {
-            id(eq_sel) = std::max(0, std::min(2, id(eq_sel) + dir));
+            id(eq_sel) = std::max(-1, std::min(2, id(eq_sel) + dir));
           }
       - script.execute: render_eq
       - script.execute: menu_timeout
 
+  # Click: on the back arrow back to the settings, on a band switch editing.
   - id: eq_click
     then:
-      - lambda: "id(eq_edit) = !id(eq_edit);"
-      - script.execute: render_eq
-      - script.execute: menu_timeout
+      - if:
+          condition:
+            lambda: "return id(eq_sel) < 0;"
+          then:
+            - script.execute: eq_back
+          else:
+            - lambda: "id(eq_edit) = !id(eq_edit);"
+            - script.execute: render_eq
+            - script.execute: menu_timeout
 
   # Hold: leave editing first, then back to the settings menu.
   - id: eq_back
@@ -1181,7 +1202,7 @@ script:
             - script.execute:
                 id: open_menu
                 m: 1
-                s: 0
+                s: 1
 
   # Leave menus, info and the equalizer page after 20 s without input.
   - id: menu_timeout
@@ -1476,9 +1497,9 @@ font:
   # Tabler line icons: volume, mute, chevrons, back, tune, info, radio,
   # settings, music, pause.
   - {file: {type: web, url: '${tabler_font}'}, id: ti16, size: 16, bpp: 4, glyphs: ["", ""]}
-  # Carousel icons: settings, cast, equalizer, info, dim.
-  - {file: {type: web, url: '${tabler_font}'}, id: ti24, size: 24, bpp: 4, glyphs: ["", "", "", "", ""]}
-  - {file: {type: web, url: '${tabler_font}'}, id: ti40, size: 40, bpp: 4, glyphs: ["", "", "", "", ""]}
+  # Carousel icons: settings, cast, equalizer, info, dim, back.
+  - {file: {type: web, url: '${tabler_font}'}, id: ti24, size: 24, bpp: 4, glyphs: ["", "", "", "", "", ""]}
+  - {file: {type: web, url: '${tabler_font}'}, id: ti40, size: 40, bpp: 4, glyphs: ["", "", "", "", "", ""]}
   - {file: {type: web, url: '${tabler_font}'}, id: ti22, size: 22, bpp: 4, glyphs: [""]}
   # Cover placeholder on the playing screen.
   - {file: {type: web, url: '${tabler_font}'}, id: ti34, size: 34, bpp: 4, glyphs: [""]}
@@ -1742,20 +1763,21 @@ lvgl:
       styles: page_style
       widgets:
         - label: {text: "Equalizer", x: 0, y: 1, width: 160, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
-        - obj: {x: 39, y: 24, width: 3, height: 61, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
-        - obj: {id: eq_fill0, x: 39, y: 84, width: 3, height: 1, radius: 1, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
-        - obj: {id: eq_knob0, x: 36, y: 80, width: 9, height: 9, radius: 5, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
-        - label: {id: eq_lbl0, text: "Bass", x: 20, y: 90, width: 40, text_align: CENTER, text_font: f11m, text_color: 0x787880}
-        - obj: {x: 79, y: 24, width: 3, height: 61, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
-        - obj: {x: 75, y: 44, width: 11, height: 1, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
-        - obj: {id: eq_fill1, x: 79, y: 84, width: 3, height: 1, radius: 1, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
-        - obj: {id: eq_knob1, x: 76, y: 80, width: 9, height: 9, radius: 5, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
-        - label: {id: eq_lbl1, text: "Mitten", x: 60, y: 90, width: 40, text_align: CENTER, text_font: f11m, text_color: 0x787880}
-        - obj: {x: 119, y: 24, width: 3, height: 61, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
-        - obj: {x: 115, y: 44, width: 11, height: 1, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
-        - obj: {id: eq_fill2, x: 119, y: 84, width: 3, height: 1, radius: 1, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
-        - obj: {id: eq_knob2, x: 116, y: 80, width: 9, height: 9, radius: 5, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
-        - label: {id: eq_lbl2, text: "Höhen", x: 100, y: 90, width: 40, text_align: CENTER, text_font: f11m, text_color: 0x787880}
+        - obj: {x: 55, y: 24, width: 3, height: 61, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {id: eq_fill0, x: 55, y: 84, width: 3, height: 1, radius: 1, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {id: eq_knob0, x: 52, y: 80, width: 9, height: 9, radius: 5, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - label: {id: eq_lbl0, text: "Bass", x: 36, y: 90, width: 40, text_align: CENTER, text_font: f11m, text_color: 0x787880}
+        - obj: {x: 97, y: 24, width: 3, height: 61, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {x: 93, y: 44, width: 11, height: 1, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {id: eq_fill1, x: 97, y: 84, width: 3, height: 1, radius: 1, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {id: eq_knob1, x: 94, y: 80, width: 9, height: 9, radius: 5, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - label: {id: eq_lbl1, text: "Mitten", x: 78, y: 90, width: 40, text_align: CENTER, text_font: f11m, text_color: 0x787880}
+        - obj: {x: 139, y: 24, width: 3, height: 61, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {x: 135, y: 44, width: 11, height: 1, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {id: eq_fill2, x: 139, y: 84, width: 3, height: 1, radius: 1, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {id: eq_knob2, x: 136, y: 80, width: 9, height: 9, radius: 5, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - label: {id: eq_lbl2, text: "Höhen", x: 120, y: 90, width: 40, text_align: CENTER, text_font: f11m, text_color: 0x787880}
+        - label: {id: eq_back_icon, text: "", x: 5, y: 42, text_font: ti24, text_color: 0x787880}
         - label: {id: eq_value, text: "", x: 0, y: 106, width: 160, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
 
     - id: ota_page
