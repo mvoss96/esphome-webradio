@@ -61,10 +61,11 @@ const lv_font_t *fit_lines(const char *text, const lv_font_t *const *fonts, int 
 }
 
 const lv_image_dsc_t *make_backdrop(const lv_image_dsc_t *src) {
-  static constexpr int W = 160, H = 128, BLUR = 3;
+  // Blur at half resolution, then scale up bilinearly. Only the output stays allocated;
+  // PSRAM is tight while audio plays.
+  static constexpr int OW = 160, OH = 128, W = OW / 2, H = OH / 2, BLUR = 2;
   static constexpr float DARK = 0.33f;
   static uint16_t *out = nullptr;
-  static uint8_t *rgb = nullptr, *tmp = nullptr;
   static lv_image_dsc_t dsc;
   if (src == nullptr || src->data == nullptr || src->header.cf != LV_COLOR_FORMAT_RGB565)
     return nullptr;
@@ -72,14 +73,18 @@ const lv_image_dsc_t *make_backdrop(const lv_image_dsc_t *src) {
   if (sw <= 0 || sh <= 0)
     return nullptr;
   if (out == nullptr) {
-    out = static_cast<uint16_t *>(heap_caps_malloc(W * H * 2, MALLOC_CAP_SPIRAM));
-    rgb = static_cast<uint8_t *>(heap_caps_malloc(W * H * 3, MALLOC_CAP_SPIRAM));
-    tmp = static_cast<uint8_t *>(heap_caps_malloc(W * H * 3, MALLOC_CAP_SPIRAM));
-    if (out == nullptr || rgb == nullptr || tmp == nullptr)
+    out = static_cast<uint16_t *>(heap_caps_malloc(OW * OH * 2, MALLOC_CAP_SPIRAM));
+    if (out == nullptr)
       return nullptr;
   }
-  // Scale to fill the screen (the overflowing side is cropped), nearest pixel; the blur
-  // smooths the enlarged pixels.
+  auto *rgb = static_cast<uint8_t *>(heap_caps_malloc(W * H * 3, MALLOC_CAP_SPIRAM));
+  auto *tmp = static_cast<uint8_t *>(heap_caps_malloc(W * H * 3, MALLOC_CAP_SPIRAM));
+  if (rgb == nullptr || tmp == nullptr) {
+    heap_caps_free(rgb);
+    heap_caps_free(tmp);
+    return nullptr;
+  }
+  // Scale to fill the working image (the overflowing side is cropped), nearest pixel.
   const int stride = src->header.stride ? src->header.stride : sw * 2;
   const float scale = std::max(W / (float) sw, H / (float) sh);
   const float ox = (sw * scale - W) / 2, oy = (sh * scale - H) / 2;
@@ -119,18 +124,33 @@ const lv_image_dsc_t *make_backdrop(const lv_image_dsc_t *src) {
       }
     }
   }
-  for (int i = 0; i < W * H; i++) {
-    const uint8_t *p = &rgb[i * 3];
-    const uint8_t r = p[0] * DARK, g = p[1] * DARK, b = p[2] * DARK;
-    out[i] = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+  // Bilinear 2x upscale with pixel centres aligned, darkened, into RGB565.
+  for (int y = 0; y < OH; y++) {
+    const float fy = std::max(0.0f, (y + 0.5f) / 2 - 0.5f);
+    const int y0 = std::min(H - 1, (int) fy), y1 = std::min(H - 1, y0 + 1);
+    const float wy = fy - y0;
+    for (int x = 0; x < OW; x++) {
+      const float fx = std::max(0.0f, (x + 0.5f) / 2 - 0.5f);
+      const int x0 = std::min(W - 1, (int) fx), x1 = std::min(W - 1, x0 + 1);
+      const float wx = fx - x0;
+      uint8_t c[3];
+      for (int k = 0; k < 3; k++) {
+        const float top = rgb[(y0 * W + x0) * 3 + k] * (1 - wx) + rgb[(y0 * W + x1) * 3 + k] * wx;
+        const float bot = rgb[(y1 * W + x0) * 3 + k] * (1 - wx) + rgb[(y1 * W + x1) * 3 + k] * wx;
+        c[k] = (top * (1 - wy) + bot * wy) * DARK;
+      }
+      out[y * OW + x] = ((c[0] & 0xF8) << 8) | ((c[1] & 0xFC) << 3) | (c[2] >> 3);
+    }
   }
+  heap_caps_free(rgb);
+  heap_caps_free(tmp);
   memset(&dsc, 0, sizeof(dsc));
   dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
   dsc.header.cf = LV_COLOR_FORMAT_RGB565;
-  dsc.header.w = W;
-  dsc.header.h = H;
-  dsc.header.stride = W * 2;
-  dsc.data_size = W * H * 2;
+  dsc.header.w = OW;
+  dsc.header.h = OH;
+  dsc.header.stride = OW * 2;
+  dsc.data_size = OW * OH * 2;
   dsc.data = reinterpret_cast<const uint8_t *>(out);
   return &dsc;
 }
