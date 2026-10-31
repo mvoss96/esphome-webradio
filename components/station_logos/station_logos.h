@@ -50,9 +50,6 @@ class StationLogos : public Component {
   /// Main loop only.
   const lv_image_dsc_t *get(int slot, size_t i, int size, bool dim);
 
-  /// Colour of the logo's outer edge (0xRRGGBB) from the last successful get() on slot.
-  uint32_t edge_colour(int slot) const { return slot >= 0 && slot < SLOT_COUNT ? this->slots_[slot].colour : 0; }
-
   /// True once after new logos became available since the last call.
   bool take_changed() { return this->changed_.exchange(false); }
 
@@ -69,7 +66,6 @@ class StationLogos : public Component {
     uint32_t key{0};
     int size{0};
     bool dim{false};
-    uint32_t colour{0};  // average of the logo's outermost pixel ring
   };
 
   static void task_entry_(void *arg);
