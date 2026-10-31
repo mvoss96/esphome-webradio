@@ -216,6 +216,16 @@ globals:
     restore_value: false
     initial_value: 'false'
 
+  # A Sendspin cover is available, and the playing screen background needs a new backdrop.
+  - id: sendspin_has_cover
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: backdrop_dirty
+    type: bool
+    restore_value: false
+    initial_value: 'true'
+
   # Equalizer page: selected band (0 bass, 1 mid, 2 treble) and whether turning edits it.
   - id: eq_sel
     type: int
@@ -561,7 +571,7 @@ media_player:
       - script.execute: refresh_volume
       - lvgl.widget.hide: clock_date
       - lvgl.widget.show: clock_vol
-      - lvgl.widget.hide: now_text
+      - lvgl.widget.hide: now_prog
       - lvgl.widget.show: now_vol
       - if:
           condition:
@@ -941,7 +951,9 @@ script:
       - lvgl.page.show: now_playing_page
       - script.execute: display_wake
 
-  # Radio: station logo and name. Sendspin: cover, title, artist.
+  # Radio: logo top left on its darkened edge colour, name below. Sendspin: darkened, blurred
+  # cover as background, title (up to two lines) and artist. A bar row at the bottom shows the
+  # track progress, or the volume while it changes.
   - id: update_playing_layout
     then:
       - lambda: |-
@@ -952,66 +964,79 @@ script:
               if (c >= 0x20 && c != 0x7F) out += c;
             return out;
           };
-          const lv_font_t *fonts[3] = {id(f16m)->get_lv_font(), id(f13m)->get_lv_font(), id(f12m)->get_lv_font()};
+          auto dim = [](uint32_t c, float k) {
+            return lv_color_make(((c >> 16) & 0xFF) * k, ((c >> 8) & 0xFF) * k, (c & 0xFF) * k);
+          };
+          const lv_font_t *fonts[3] = {id(f24t)->get_lv_font(), id(f20t)->get_lv_font(), id(f16m)->get_lv_font()};
+          lv_obj_t *page = id(now_playing_page)->obj;
           std::string name, sub;
+          float duration = NAN;
           if (id(radio_active)) {
             const auto &names = id(station_names);
             const int idx = id(station_index);
             if (idx < 0 || idx >= (int) names.size()) return;
             name = names[idx];
-            lv_label_set_text(id(lbl_source), "Radio");
+            const lv_image_dsc_t *logo = id(logos)->get(3, idx, 52, false);
+            esphome::station_logos::show_logo(id(radio_logo_box), id(radio_logo_img), id(radio_logo_lbl), logo, name);
             lv_obj_remove_flag(id(radio_logo_box), LV_OBJ_FLAG_HIDDEN);
-            lv_obj_add_flag(id(cover_box), LV_OBJ_FLAG_HIDDEN);
-            esphome::station_logos::show_logo(id(radio_logo_box), id(radio_logo_img), id(radio_logo_lbl),
-                                              id(logos)->get(3, idx, 74, false), name);
-          } else if (id(airplay_active)) {
-            name = clean(id(airplay_title).state);
-            sub = clean(id(airplay_artist).state);
-            if (name.empty()) name = "AirPlay";
-            lv_label_set_text(id(lbl_source), "AirPlay");
+            lv_obj_add_flag(id(now_bg), LV_OBJ_FLAG_HIDDEN);
+            const uint32_t edge = logo != nullptr ? id(logos)->edge_colour(3) : 0x101014;
+            lv_obj_set_style_bg_color(page, dim(edge, 0.35f), 0);
+            lv_obj_set_style_bg_color(id(bar_vol), dim(edge, 0.7f), LV_PART_MAIN);
+            id(backdrop_dirty) = true;  // the cover backdrop is rebuilt when Sendspin plays again
+          } else {
+            const bool air = id(airplay_active);
+            name = clean(air ? id(airplay_title).state : id(sendspin_title).state);
+            sub = clean(air ? id(airplay_artist).state : id(sendspin_artist).state);
+            if (air && name.empty()) name = "AirPlay";
+            duration = air ? id(airplay_duration).state : id(sendspin_duration).state;
             lv_obj_add_flag(id(radio_logo_box), LV_OBJ_FLAG_HIDDEN);
-            lv_obj_remove_flag(id(cover_box), LV_OBJ_FLAG_HIDDEN);
-            lv_obj_add_flag(id(cover_art), LV_OBJ_FLAG_HIDDEN);
-            if (id(airplay_has_cover)) {
-              lv_obj_remove_flag(id(airplay_art), LV_OBJ_FLAG_HIDDEN);
-              lv_obj_add_flag(id(cover_placeholder), LV_OBJ_FLAG_HIDDEN);
-            } else {
-              lv_obj_add_flag(id(airplay_art), LV_OBJ_FLAG_HIDDEN);
-              lv_obj_remove_flag(id(cover_placeholder), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_style_bg_color(page, lv_color_hex(0x060608), 0);
+            lv_obj_set_style_bg_color(id(bar_vol), lv_color_hex(0x6E6E76), LV_PART_MAIN);
+            if (id(backdrop_dirty)) {
+              id(backdrop_dirty) = false;
+              const lv_image_dsc_t *src = nullptr;
+              if (air && id(airplay_has_cover)) src = id(airplay_cover)->get_lv_image_dsc();
+              else if (!air && id(sendspin_has_cover)) src = id(sendspin_cover_art)->get_lv_image_dsc();
+              const lv_image_dsc_t *bd = make_backdrop(src);
+              if (bd != nullptr) {
+                lv_image_set_src(id(now_bg), bd);
+                lv_obj_remove_flag(id(now_bg), LV_OBJ_FLAG_HIDDEN);
+              } else {
+                lv_obj_add_flag(id(now_bg), LV_OBJ_FLAG_HIDDEN);
+              }
             }
-          } else {
-            name = clean(id(sendspin_title).state);
-            sub = clean(id(sendspin_artist).state);
-            lv_label_set_text(id(lbl_source), "Sendspin");
-            lv_obj_add_flag(id(airplay_art), LV_OBJ_FLAG_HIDDEN);
-            lv_obj_add_flag(id(radio_logo_box), LV_OBJ_FLAG_HIDDEN);
-            lv_obj_remove_flag(id(cover_box), LV_OBJ_FLAG_HIDDEN);
           }
-          // With a known track length: title and artist in one line, the progress row below.
-          float duration = NAN;
-          if (id(airplay_active)) duration = id(airplay_duration).state;
-          else if (!id(radio_active)) duration = id(sendspin_duration).state;
           id(progress_shown) = !std::isnan(duration) && duration > 0;
-          if (id(progress_shown)) {
-            const std::string line = sub.empty() ? name : name + " \u00b7 " + sub;
-            const lv_font_t *small[3] = {id(f13m)->get_lv_font(), id(f12m)->get_lv_font(), id(f11m)->get_lv_font()};
-            lv_label_set_text(id(lbl_now_name), line.c_str());
-            lv_obj_set_style_text_font(id(lbl_now_name), fit_font(line.c_str(), small, 3, 148), 0);
-            lv_obj_set_y(id(lbl_now_name), 0);
+          const bool vol_shown = !lv_obj_has_flag(id(now_vol), LV_OBJ_FLAG_HIDDEN);
+          if (id(progress_shown) && !vol_shown) lv_obj_remove_flag(id(now_prog), LV_OBJ_FLAG_HIDDEN);
+          else lv_obj_add_flag(id(now_prog), LV_OBJ_FLAG_HIDDEN);
+
+          // Title: the largest font in which it wraps into two lines; artist below in 16 px.
+          const lv_font_t *font = fit_lines(name.c_str(), fonts, 3, 144, 2);
+          const int lh = lv_font_get_line_height(font);
+          lv_point_t size;
+          lv_text_get_size(&size, name.c_str(), font, 0, 0, 144, LV_TEXT_FLAG_NONE);
+          const int title_h = std::min<int>(size.y, 2 * lh);
+          lv_label_set_text(id(lbl_now_name), name.c_str());
+          lv_obj_set_style_text_font(id(lbl_now_name), font, 0);
+          lv_obj_set_height(id(lbl_now_name), title_h);
+          if (id(radio_active)) {
+            // Below the logo (8..60), centred in the rest above the bar row.
+            lv_obj_set_y(id(lbl_now_name), 64 + std::max(0, (106 - 64 - title_h) / 2));
             lv_obj_add_flag(id(lbl_now_sub), LV_OBJ_FLAG_HIDDEN);
-            lv_obj_remove_flag(id(now_prog), LV_OBJ_FLAG_HIDDEN);
           } else {
-            lv_label_set_text(id(lbl_now_name), name.c_str());
-            lv_obj_set_style_text_font(id(lbl_now_name), fit_font(name.c_str(), fonts, 3, 148), 0);
+            const int sub_h = sub.empty() ? 0 : 22;
+            const int top = (108 - title_h - sub_h) / 2;
+            lv_obj_set_y(id(lbl_now_name), top);
             lv_label_set_text(id(lbl_now_sub), sub.c_str());
-            // Without a second line the name moves down to the middle of the text area.
-            lv_obj_set_y(id(lbl_now_name), sub.empty() ? 7 : 2);
-            lv_obj_remove_flag(id(lbl_now_sub), LV_OBJ_FLAG_HIDDEN);
-            lv_obj_add_flag(id(now_prog), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_y(id(lbl_now_sub), top + title_h + 2);
+            if (sub.empty()) lv_obj_add_flag(id(lbl_now_sub), LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_remove_flag(id(lbl_now_sub), LV_OBJ_FLAG_HIDDEN);
           }
       - script.execute: update_progress
 
-  # Elapsed time, bar and total time of the progress row; once per second while it is shown.
+  # Progress bar of the playing screen; once per second while it is shown.
   - id: update_progress
     then:
       - lambda: |-
@@ -1024,14 +1049,6 @@ script:
           if (std::isnan(dur) || dur <= 0) return;
           if (std::isnan(pos) || pos < 0) pos = 0;
           if (pos > dur) pos = dur;
-          auto mmss = [](float ms) {
-            const int s = (int) (ms / 1000);
-            char buf[12];
-            snprintf(buf, sizeof(buf), "%d:%02d", s / 60, s % 60);
-            return std::string(buf);
-          };
-          lv_label_set_text(id(lbl_prog_pos), mmss(pos).c_str());
-          lv_label_set_text(id(lbl_prog_dur), mmss(dur).c_str());
           lv_bar_set_value(id(bar_prog), (int) (pos * 1000 / dur), LV_ANIM_OFF);
 
   # Back to the playing screen when something plays, else to the clock.
@@ -1148,9 +1165,9 @@ script:
           c.right = {id(r_root), id(r_logo), id(r_img), id(r_ini), id(r_icon), id(r_value)};
           lv_obj_t *steps[DIM_STEP_COUNT] = {id(step0), id(step1), id(step2), id(step3), id(step4), id(step5), id(step6)};
           for (int k = 0; k < DIM_STEP_COUNT; k++) c.steps[k] = steps[k];
-          c.name_fonts[0] = id(f16m)->get_lv_font();
+          c.name_fonts[0] = id(f13m)->get_lv_font();
           c.name_fonts[1] = id(f13m)->get_lv_font();
-          c.name_fonts[2] = id(f12m)->get_lv_font();
+          c.name_fonts[2] = id(f13m)->get_lv_font();
           id(menu_sel) = std::max(0, std::min(sel, (int) items.size() - 1));
           render(c, items, id(menu_sel), edit, id(logos), names);
 
@@ -1176,7 +1193,7 @@ script:
           else snprintf(buf, sizeof(buf), "%d dBm", (int) id(wifi_signal_strength).state);
           lv_label_set_text(id(lbl_info_rssi), buf);
           lv_label_set_text(id(lbl_info_ip), id(ip_address).state.c_str());
-          lv_label_set_text(id(lbl_info_ha), esphome::api::global_api_server->is_connected() ? "verbunden" : "getrennt");
+          lv_label_set_text(id(lbl_info_ha), esphome::api::global_api_server->is_connected() ? "connected" : "disconnected");
           lv_label_set_text(id(lbl_info_version), ESPHOME_PROJECT_VERSION);
           snprintf(buf, sizeof(buf), "%u", (unsigned) id(station_names).size());
           lv_label_set_text(id(lbl_info_count), buf);
@@ -1542,25 +1559,25 @@ script:
           const int pct = muted ? 0 : (int) lroundf(v * 100);
           char buf[8];
           snprintf(buf, sizeof(buf), "%d", pct);
-          const lv_font_t *font = muted ? id(f16m)->get_lv_font() : id(f20m)->get_lv_font();
-          lv_label_set_text(id(lbl_clock_vol), muted ? "Stumm" : buf);
+          const lv_font_t *font = muted ? id(ti24)->get_lv_font() : id(f20m)->get_lv_font();
+          lv_label_set_text(id(lbl_clock_vol), muted ? ICON_MUTE : buf);
           lv_obj_set_style_text_font(id(lbl_clock_vol), font, 0);
           lv_obj_set_style_text_color(id(lbl_clock_vol), lv_color_hex(muted ? SUB : TEXT), 0);
-          lv_obj_set_y(id(lbl_clock_vol), muted ? 2 : 0);  // same centre line for 16 and 20 px
-          lv_label_set_text(id(lbl_vol_pct), muted ? "Stumm" : buf);
-          lv_obj_set_style_text_color(id(lbl_vol_pct), lv_color_hex(muted ? SUB : TEXT), 0);
+          lv_label_set_text(id(lbl_vol_icon), muted ? ICON_MUTE : ICON_VOLUME);
+          lv_obj_set_style_text_color(id(lbl_vol_icon), lv_color_hex(muted ? SUB : TEXT), 0);
           for (lv_obj_t *bar : {id(bar_vol), id(bar_clock_vol)})
             lv_bar_set_value(bar, pct, LV_ANIM_OFF);
 
-  # Two seconds after the last change: text back instead of the volume row.
+  # Two seconds after the last change: date / progress row back instead of the volume row.
   - id: vol_idle
     mode: restart
     then:
       - delay: 2s
       - lvgl.widget.show: clock_date
       - lvgl.widget.hide: clock_vol
-      - lvgl.widget.show: now_text
       - lvgl.widget.hide: now_vol
+      - lambda: |-
+          if (id(progress_shown)) lv_obj_remove_flag(id(now_prog), LV_OBJ_FLAG_HIDDEN);
 
   - id: update_time_labels
     then:
@@ -1574,7 +1591,6 @@ script:
           char buf[40];
           snprintf(buf, sizeof(buf), "%02d:%02d", t.hour, t.minute);
           lv_label_set_text(id(lbl_idle_time), buf);
-          lv_label_set_text(id(lbl_top_time), buf);
           lv_label_set_text(id(lbl_idle_day), DAYS[t.day_of_week - 1]);
           snprintf(buf, sizeof(buf), "%d. %s", t.day_of_month, MONTHS[t.month - 1]);
           lv_label_set_text(id(lbl_idle_date), buf);
@@ -1616,18 +1632,21 @@ image:
     current_image:
       id: sendspin_cover_art
     on_image_display:
-      - lvgl.image.update:
-          id: cover_art
-          src: sendspin_cover_art
-      - lvgl.widget.show: cover_art
-      - lvgl.widget.hide: cover_placeholder
+      - lambda: |-
+          id(sendspin_has_cover) = true;
+          id(backdrop_dirty) = true;
+      - script.execute: update_playing_layout
     on_image_clear:
-      - lvgl.widget.hide: cover_art
-      - lvgl.widget.show: cover_placeholder
+      - lambda: |-
+          id(sendspin_has_cover) = false;
+          id(backdrop_dirty) = true;
+      - script.execute: update_playing_layout
     on_image_error:
       - logger.log: "Cover art: no image available"
-      - lvgl.widget.hide: cover_art
-      - lvgl.widget.show: cover_placeholder
+      - lambda: |-
+          id(sendspin_has_cover) = false;
+          id(backdrop_dirty) = true;
+      - script.execute: update_playing_layout
 
   # Cover from the AirPlay sender; shown by update_playing_layout while AirPlay plays.
   - platform: airplay
@@ -1636,13 +1655,14 @@ image:
     resize: 74x74
     max_size: 300kB
     on_image_update:
-      - lambda: "id(airplay_has_cover) = true;"
-      - lvgl.image.update:
-          id: airplay_art
-          src: airplay_cover
+      - lambda: |-
+          id(airplay_has_cover) = true;
+          id(backdrop_dirty) = true;
       - script.execute: update_playing_layout
     on_image_clear:
-      - lambda: "id(airplay_has_cover) = false;"
+      - lambda: |-
+          id(airplay_has_cover) = false;
+          id(backdrop_dirty) = true;
       - script.execute: update_playing_layout
     on_image_error:
       - logger.log: "AirPlay cover could not be decoded"
@@ -1656,14 +1676,15 @@ font:
   - {file: "gfonts://Montserrat@500", id: f13m, size: 13, bpp: 4, glyphsets: [GF_Latin_Core]}
   - {file: "gfonts://Montserrat@500", id: f16m, size: 16, bpp: 4, glyphsets: [GF_Latin_Core]}
   - {file: "gfonts://Montserrat@500", id: f20m, size: 20, bpp: 4, glyphs: "0123456789"}
-  - {file: "gfonts://Montserrat@500", id: f24m, size: 24, bpp: 4, glyphs: " 0123456789Ausimn"}
+  - {file: "gfonts://Montserrat@500", id: f20t, size: 20, bpp: 4, glyphsets: [GF_Latin_Core]}
+  - {file: "gfonts://Montserrat@500", id: f24t, size: 24, bpp: 4, glyphsets: [GF_Latin_Core]}
   - {file: "gfonts://Montserrat", id: f44r, size: 44, bpp: 4, glyphs: "0123456789:-"}
 
   # Tabler line icons: volume, mute, chevrons, back, tune, info, radio,
   # settings, music, pause.
   - {file: {type: web, url: '${tabler_font}'}, id: ti16, size: 16, bpp: 4, glyphs: ["", ""]}
-  # Carousel icons: settings, cast, equalizer, info, dim, back.
-  - {file: {type: web, url: '${tabler_font}'}, id: ti24, size: 24, bpp: 4, glyphs: ["", "", "", "", "", ""]}
+  # Carousel icons: settings, cast, equalizer, info, dim, back; volume and mute.
+  - {file: {type: web, url: '${tabler_font}'}, id: ti24, size: 24, bpp: 4, glyphs: ["", "", "", "", "", "", "", ""]}
   - {file: {type: web, url: '${tabler_font}'}, id: ti40, size: 40, bpp: 4, glyphs: ["", "", "", "", "", ""]}
   - {file: {type: web, url: '${tabler_font}'}, id: ti22, size: 22, bpp: 4, glyphs: [""]}
   # Cover placeholder on the playing screen.
@@ -1741,113 +1762,77 @@ lvgl:
                     bg_color: 0xFFB020
                     radius: 3
 
-    # 1: Playing. Radio shows the station logo, Sendspin the cover.
+    # 1: Playing. Radio: logo on its edge colour. Sendspin: the cover as darkened background.
     - id: now_playing_page
       styles: page_style
       widgets:
-        - label: {id: lbl_source, text: "Radio", x: 8, y: 2, text_font: f12m, text_color: 0xC4C4CC}
-        - label: {id: lbl_top_time, text: "", x: 104, y: 2, width: 48, text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
+        - image: {id: now_bg, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
         - obj:
             id: radio_logo_box
             styles: logo_box
-            x: 43
-            y: 18
-            width: 74
-            height: 74
-            radius: 15
+            x: 8
+            y: 8
+            width: 52
+            height: 52
+            radius: 11
+            scrollable: false
             widgets:
               - image: {id: radio_logo_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
               - label: {id: radio_logo_lbl, text: "", align: CENTER, text_font: f16m, text_color: 0xC4C4CC}
+        - label: {id: lbl_now_name, text: "", x: 8, y: 20, width: 144, height: 58, long_mode: DOT, text_font: f24t, text_color: 0xFFFFFF}
+        - label: {id: lbl_now_sub, text: "", x: 8, y: 80, width: 144, height: 20, long_mode: DOT, text_font: f16m, text_color: 0xE1E1E8}
+        - label: {id: pause_overlay, text: "", x: 132, y: 6, text_font: ti22, text_color: 0xFFFFFF, hidden: true}
         - obj:
-            id: cover_box
-            styles: logo_box
-            x: 43
-            y: 18
-            width: 74
-            height: 74
-            radius: 13
-            hidden: true
-            widgets:
-              - label: {id: cover_placeholder, text: "", align: CENTER, text_font: ti34, text_color: 0x787880}
-              - image: {id: cover_art, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
-              - image: {id: airplay_art, src: airplay_cover, align: CENTER, hidden: true}
-              - obj:
-                  id: pause_overlay
-                  x: 0
-                  y: 0
-                  width: 74
-                  height: 74
-                  bg_color: 0x000000
-                  bg_opa: 55%
-                  border_width: 0
-                  radius: 0
-                  pad_all: 0
-                  hidden: true
-                  widgets:
-                    - label: {text: "", align: CENTER, text_font: ti22, text_color: 0xFFFFFF}
-        - obj:
-            id: now_text
+            id: now_prog
             styles: plain
-            x: 0
-            y: 92
-            width: 160
-            height: 36
-            scrollable: false
-            widgets:
-              - label: {id: lbl_now_name, text: "", height: 20, x: 6, y: 2, width: 148, long_mode: DOT, text_align: CENTER, text_font: f16m, text_color: 0xFFFFFF}
-              - label: {id: lbl_now_sub, text: "", height: 15, x: 6, y: 21, width: 148, long_mode: DOT, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
-              - obj:
-                  id: now_prog
-                  styles: plain
-                  x: 0
-                  y: 20
-                  width: 160
-                  height: 16
-                  hidden: true
-                  widgets:
-                    - label: {id: lbl_prog_pos, text: "", x: 6, y: 1, width: 30, text_align: LEFT, text_font: f10m, text_color: 0xC4C4CC}
-                    - bar:
-                        id: bar_prog
-                        x: 36
-                        y: 6
-                        width: 88
-                        height: 3
-                        min_value: 0
-                        max_value: 1000
-                        value: 0
-                        radius: 1
-                        bg_color: 0x46464E
-                        bg_opa: COVER
-                        indicator:
-                          bg_color: 0xFFB020
-                          radius: 1
-                    - label: {id: lbl_prog_dur, text: "", x: 124, y: 1, width: 30, text_align: RIGHT, text_font: f10m, text_color: 0xC4C4CC}
-        - obj:
-            id: now_vol
-            styles: plain
-            x: 0
-            y: 92
-            width: 160
-            height: 36
+            x: 8
+            y: 114
+            width: 144
+            height: 4
             scrollable: false
             hidden: true
             widgets:
               - bar:
-                  id: bar_vol
-                  x: 20
-                  y: 11
-                  width: 82
-                  height: 6
+                  id: bar_prog
+                  x: 0
+                  y: 0
+                  width: 144
+                  height: 4
                   min_value: 0
-                  max_value: 100
-                  value: 50
-                  radius: 3
-                  bg_color: 0x46464E
+                  max_value: 1000
+                  value: 0
+                  radius: 0
+                  bg_color: 0x6E6E76
                   bg_opa: COVER
                   indicator:
                     bg_color: 0xFFB020
-                    radius: 3
-              - label: {id: lbl_vol_pct, text: "", x: 104, y: 5, width: 54, long_mode: CLIP, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
+                    radius: 0
+        - obj:
+            id: now_vol
+            styles: plain
+            x: 8
+            y: 104
+            width: 144
+            height: 24
+            scrollable: false
+            hidden: true
+            widgets:
+              - label: {id: lbl_vol_icon, text: "", x: 0, y: 0, text_font: ti24, text_color: 0xFFFFFF}
+              - bar:
+                  id: bar_vol
+                  x: 30
+                  y: 10
+                  width: 114
+                  height: 4
+                  min_value: 0
+                  max_value: 100
+                  value: 50
+                  radius: 0
+                  bg_color: 0x6E6E76
+                  bg_opa: COVER
+                  indicator:
+                    bg_color: 0xFFB020
+                    radius: 0
 
     # 2: Carousel for all menus, filled by render_menu / radio_ui::render.
     - id: carousel_page
@@ -1875,7 +1860,7 @@ lvgl:
                     - image: {id: c_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
                     - label: {id: c_ini, text: "", align: CENTER, text_font: f16m, text_color: 0xC4C4CC}
               - label: {id: c_icon, text: "", align: CENTER, text_font: ti40, text_color: 0xFFFFFF, hidden: true}
-              - label: {id: c_value, text: "", align: CENTER, y: -4, text_font: f24m, text_color: 0xFFB020, hidden: true}
+              - label: {id: c_value, text: "", align: CENTER, y: -4, text_font: f24t, text_color: 0xFFB020, hidden: true}
         - obj:
             id: l_root
             styles: plain
@@ -1924,7 +1909,7 @@ lvgl:
               - label: {id: r_value, text: "", align: CENTER, text_font: f10m, text_color: 0xFFFFFF, hidden: true}
         - label: {id: c_chev_l, text: "", x: 16, y: 42, text_font: ti16, text_color: 0xC4C4CC, hidden: true}
         - label: {id: c_chev_r, text: "", x: 128, y: 42, text_font: ti16, text_color: 0xC4C4CC, hidden: true}
-        - label: {id: c_name, text: "", height: 19, x: 6, y: 95, width: 148, long_mode: DOT, text_align: CENTER, text_font: f16m, text_color: 0xFFFFFF}
+        - label: {id: c_name, text: "", height: 16, x: 6, y: 97, width: 148, long_mode: SCROLL_CIRCULAR, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
         - label: {id: c_sub, text: "", height: 15, x: 6, y: 112, width: 148, long_mode: DOT, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
         - obj: {id: step0, x: 0, y: 0, width: 4, height: 4, radius: 3, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
         - obj: {id: step1, x: 0, y: 0, width: 4, height: 4, radius: 3, bg_color: 0x787880, bg_opa: COVER, border_width: 0, hidden: true}
@@ -1939,7 +1924,7 @@ lvgl:
       styles: page_style
       widgets:
         - label: {text: "Info", x: 0, y: 1, width: 160, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
-        - label: {text: "WLAN", x: 8, y: 22, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {text: "Wi-Fi", x: 8, y: 22, text_font: f12m, text_color: 0xC4C4CC}
         - label: {id: lbl_info_ssid, text: "", height: 15, x: 60, y: 22, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
         - label: {text: "Signal", x: 8, y: 39, text_font: f12m, text_color: 0xC4C4CC}
         - label: {id: lbl_info_rssi, text: "", height: 15, x: 60, y: 39, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
@@ -1949,7 +1934,7 @@ lvgl:
         - label: {id: lbl_info_ha, text: "", height: 15, x: 60, y: 73, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
         - label: {text: "Firmware", x: 8, y: 90, text_font: f12m, text_color: 0xC4C4CC}
         - label: {id: lbl_info_version, text: "", height: 15, x: 60, y: 90, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
-        - label: {text: "Sender", x: 8, y: 107, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {text: "Stations", x: 8, y: 107, text_font: f12m, text_color: 0xC4C4CC}
         - label: {id: lbl_info_count, text: "", height: 15, x: 60, y: 107, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
 
     # 4: Equalizer: bass, mid and treble, see render_eq.

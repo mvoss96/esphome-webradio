@@ -84,6 +84,14 @@ struct Carousel {
 /// Largest font of the list in which text fits into max_width pixels.
 const lv_font_t *fit_font(const char *text, const lv_font_t *const *fonts, int count, int max_width);
 
+/// Largest font of the list in which text wraps into at most max_lines lines of max_width
+/// pixels without breaking a word; the last font when none fits.
+const lv_font_t *fit_lines(const char *text, const lv_font_t *const *fonts, int count, int max_width, int max_lines);
+
+/// Background for the playing screen: src scaled to fill 160x128, blurred and darkened.
+/// nullptr when src is missing or not RGB565. Main loop only; every call reuses one buffer.
+const lv_image_dsc_t *make_backdrop(const lv_image_dsc_t *src);
+
 /// "0", "+6" or "-1.5" for a gain in dB.
 std::string gain_text(float value);
 

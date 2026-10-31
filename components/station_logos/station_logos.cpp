@@ -435,6 +435,16 @@ const lv_image_dsc_t *StationLogos::get(int slot, size_t i, int size, bool dim) 
     return nullptr;
   for (int k = 0; k < STORE * STORE; k++)
     rgb888(this->read_px_[k], &this->rgb_[k * 3]);
+  // Edge colour: the logo's background, used behind it on the playing screen.
+  uint32_t sum[3] = {0, 0, 0}, n = 0;
+  for (int k = 0; k < STORE; k++) {
+    for (int idx : {k, (STORE - 1) * STORE + k, k * STORE, k * STORE + STORE - 1}) {
+      for (int c = 0; c < 3; c++)
+        sum[c] += this->rgb_[idx * 3 + c];
+      n++;
+    }
+  }
+  s.colour = ((sum[0] / n) << 16) | ((sum[1] / n) << 8) | (sum[2] / n);
   const uint8_t *src = this->rgb_;
   if (size != STORE) {
     scale(this->rgb_, STORE, this->scaled_, size);
