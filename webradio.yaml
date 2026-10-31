@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.9.8-airplay"
+    version: "1.9.9-airplay"
   on_boot:
     priority: -100
     then:
@@ -593,6 +593,28 @@ sensor:
           then:
             - script.execute: update_playing_layout
 
+  # Position and length of the AirPlay track in ms.
+  - platform: airplay
+    type: track_progress
+    id: airplay_progress
+    internal: true
+    on_value:
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 1 && id(progress_shown);"
+          then:
+            - script.execute: update_progress
+  - platform: airplay
+    type: track_duration
+    id: airplay_duration
+    internal: true
+    on_value:
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 1;"
+          then:
+            - script.execute: update_playing_layout
+
   # Memory diagnostics in KB, to see whether internal RAM or PSRAM runs low.
   - platform: template
     name: "Heap frei"
@@ -967,7 +989,8 @@ script:
           }
           // With a known track length: title and artist in one line, the progress row below.
           float duration = NAN;
-          if (!id(radio_active)) duration = id(sendspin_duration).state;
+          if (id(airplay_active)) duration = id(airplay_duration).state;
+          else if (!id(radio_active)) duration = id(sendspin_duration).state;
           id(progress_shown) = !std::isnan(duration) && duration > 0;
           if (id(progress_shown)) {
             const std::string line = sub.empty() ? name : name + " \u00b7 " + sub;
@@ -994,6 +1017,10 @@ script:
       - lambda: |-
           if (!id(progress_shown)) return;
           float pos = id(sendspin_progress).state, dur = id(sendspin_duration).state;
+          if (id(airplay_active)) {
+            pos = id(airplay_progress).state;
+            dur = id(airplay_duration).state;
+          }
           if (std::isnan(dur) || dur <= 0) return;
           if (std::isnan(pos) || pos < 0) pos = 0;
           if (pos > dur) pos = dur;
