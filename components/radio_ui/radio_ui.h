@@ -48,6 +48,7 @@ struct Item {
   std::string value_text;    // STEPS: current value, shown large while editing
   bool playing{false};           // STATION / ICON: tile background with an accent border
   const char *letter{nullptr};   // ICON while playing: letter inside the screen of the cast icon
+  const lv_image_dsc_t *cover{nullptr};  // ICON while playing: cover shown instead of the icon
 };
 
 /// Steps of the "dim after" setting in seconds; 0 = never.

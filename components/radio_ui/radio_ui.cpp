@@ -167,6 +167,67 @@ std::string dim_text(float seconds) {
   return buf;
 }
 
+/// Cover scaled to size x size (centre crop, area average) with rounded corners and an
+/// optional dimming baked in, in a buffer per carousel slot. nullptr when src is not RGB565.
+static const lv_image_dsc_t *cover_tile(const lv_image_dsc_t *src, int slot, int size, bool dim) {
+  static constexpr int MAX = TILE_CENTER;
+  static uint16_t *bufs[3] = {nullptr, nullptr, nullptr};
+  static lv_image_dsc_t dscs[3];
+  if (src == nullptr || src->data == nullptr || src->header.cf != LV_COLOR_FORMAT_RGB565 || slot < 0 ||
+      slot > 2 || size > MAX)
+    return nullptr;
+  if (bufs[slot] == nullptr)
+    bufs[slot] = static_cast<uint16_t *>(heap_caps_malloc(MAX * MAX * 2, MALLOC_CAP_SPIRAM));
+  if (bufs[slot] == nullptr)
+    return nullptr;
+  const int sw = src->header.w, sh = src->header.h;
+  const int stride = src->header.stride ? src->header.stride : sw * 2;
+  const int side = std::min(sw, sh);  // square centre crop of the source
+  const int x0 = (sw - side) / 2, y0 = (sh - side) / 2;
+  const int radius = std::max(7, size * 12 / 56);
+  const float k = dim ? 0.6f : 1.0f;
+  for (int y = 0; y < size; y++) {
+    for (int x = 0; x < size; x++) {
+      // Average the source pixels covered by this target pixel.
+      const int sx0 = x0 + x * side / size, sx1 = std::max(sx0 + 1, x0 + (x + 1) * side / size);
+      const int sy0 = y0 + y * side / size, sy1 = std::max(sy0 + 1, y0 + (y + 1) * side / size);
+      uint32_t r = 0, g = 0, b = 0, n = 0;
+      for (int sy = sy0; sy < sy1; sy++) {
+        const uint16_t *row = reinterpret_cast<const uint16_t *>(src->data + sy * stride);
+        for (int sx = sx0; sx < sx1; sx++) {
+          const uint16_t v = row[sx];
+          r += (v >> 11) & 0x1F;
+          g += (v >> 5) & 0x3F;
+          b += v & 0x1F;
+          n++;
+        }
+      }
+      // Rounded corners: coverage against the corner circle, blended towards the page background.
+      float cov = 1.0f;
+      const int cx = x < radius ? radius : (x >= size - radius ? size - radius : -1);
+      const int cy = y < radius ? radius : (y >= size - radius ? size - radius : -1);
+      if (cx >= 0 && cy >= 0) {
+        const float dx = x + 0.5f - cx, dy = y + 0.5f - cy;
+        cov = std::max(0.0f, std::min(1.0f, radius - std::sqrt(dx * dx + dy * dy) + 0.5f));
+      }
+      const float f = cov * k;
+      const uint8_t r8 = 6 + ((r / n) * 255 / 31 - 6) * f, g8 = 6 + ((g / n) * 255 / 63 - 6) * f,
+                    b8 = 8 + ((b / n) * 255 / 31 - 8) * f;
+      bufs[slot][y * size + x] = ((r8 & 0xF8) << 8) | ((g8 & 0xFC) << 3) | (b8 >> 3);
+    }
+  }
+  lv_image_dsc_t &d = dscs[slot];
+  memset(&d, 0, sizeof(d));
+  d.header.magic = LV_IMAGE_HEADER_MAGIC;
+  d.header.cf = LV_COLOR_FORMAT_RGB565;
+  d.header.w = size;
+  d.header.h = size;
+  d.header.stride = size * 2;
+  d.data_size = size * size * 2;
+  d.data = reinterpret_cast<const uint8_t *>(bufs[slot]);
+  return &d;
+}
+
 static void render_slot(const Slot &s, int slot, const Item *it, bool center, bool editing,
                         station_logos::StationLogos *logos, const std::vector<std::string> &names) {
   if (it == nullptr) {
@@ -194,6 +255,21 @@ static void render_slot(const Slot &s, int slot, const Item *it, bool center, bo
     }
     case Item::BACK:
     case Item::ICON: {
+      // The playing source with a cover: the cover replaces the icon on the tile.
+      const lv_image_dsc_t *cover =
+          it->playing && it->cover != nullptr ? cover_tile(it->cover, slot, center ? TILE_CENTER : TILE_SIDE, !center)
+                                              : nullptr;
+      if (cover != nullptr) {
+        show(s.logo_box);
+        hide(s.logo_lbl);
+        show(s.logo_img);
+        lv_image_set_src(s.logo_img, cover);
+        lv_obj_align(s.logo_img, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_set_style_image_opa(s.logo_img, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_opa(s.logo_box, LV_OPA_TRANSP, 0);
+        mark_playing(s, true);
+        break;
+      }
       show(s.icon);
       lv_label_set_text(s.icon, it->icon);
       if (it->playing) {
