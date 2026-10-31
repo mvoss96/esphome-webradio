@@ -1060,6 +1060,7 @@ script:
               Item i = icon(ICON_CAST, "Sendspin", "");
               i.letter = "S";
               i.playing = true;
+              if (id(sendspin_has_cover)) i.cover = id(sendspin_cover_art)->get_lv_image_dsc();
               items.push_back(i);
             }
             id(menu_first) = (int) items.size();
@@ -1566,11 +1567,21 @@ image:
           id(sendspin_has_cover) = true;
           id(backdrop_dirty) = true;
       - script.execute: update_playing_layout
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 2 && id(menu) == 0;"
+          then:
+            - script.execute: render_menu
     on_image_clear:
       - lambda: |-
           id(sendspin_has_cover) = false;
           id(backdrop_dirty) = true;
       - script.execute: update_playing_layout
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 2 && id(menu) == 0;"
+          then:
+            - script.execute: render_menu
     on_image_error:
       - logger.log: "Cover art: no image available"
       - lambda: |-
