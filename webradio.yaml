@@ -210,6 +210,12 @@ globals:
     restore_value: false
     initial_value: 'false'
 
+  # The playing screen shows the progress row (the track has a known length).
+  - id: progress_shown
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
   # Equalizer page: selected band (0 bass, 1 mid, 2 treble) and whether turning edits it.
   - id: eq_sel
     type: int
@@ -565,6 +571,28 @@ media_player:
       - script.execute: vol_idle
 
 sensor:
+  # Position and length of the Sendspin track in ms, for the progress row.
+  - platform: sendspin
+    type: track_progress
+    id: sendspin_progress
+    internal: true
+    on_value:
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 1 && id(progress_shown);"
+          then:
+            - script.execute: update_progress
+  - platform: sendspin
+    type: track_duration
+    id: sendspin_duration
+    internal: true
+    on_value:
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 1;"
+          then:
+            - script.execute: update_playing_layout
+
   # Memory diagnostics in KB, to see whether internal RAM or PSRAM runs low.
   - platform: template
     name: "Heap frei"
@@ -937,11 +965,47 @@ script:
             lv_obj_add_flag(id(radio_logo_box), LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(id(cover_box), LV_OBJ_FLAG_HIDDEN);
           }
-          lv_label_set_text(id(lbl_now_name), name.c_str());
-          lv_obj_set_style_text_font(id(lbl_now_name), fit_font(name.c_str(), fonts, 3, 148), 0);
-          lv_label_set_text(id(lbl_now_sub), sub.c_str());
-          // Without a second line the name moves down to the middle of the text area.
-          lv_obj_set_y(id(lbl_now_name), sub.empty() ? 7 : 2);
+          // With a known track length: title and artist in one line, the progress row below.
+          float duration = NAN;
+          if (!id(radio_active)) duration = id(sendspin_duration).state;
+          id(progress_shown) = !std::isnan(duration) && duration > 0;
+          if (id(progress_shown)) {
+            const std::string line = sub.empty() ? name : name + " \u00b7 " + sub;
+            const lv_font_t *small[3] = {id(f13m)->get_lv_font(), id(f12m)->get_lv_font(), id(f11m)->get_lv_font()};
+            lv_label_set_text(id(lbl_now_name), line.c_str());
+            lv_obj_set_style_text_font(id(lbl_now_name), fit_font(line.c_str(), small, 3, 148), 0);
+            lv_obj_set_y(id(lbl_now_name), 0);
+            lv_obj_add_flag(id(lbl_now_sub), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(id(now_prog), LV_OBJ_FLAG_HIDDEN);
+          } else {
+            lv_label_set_text(id(lbl_now_name), name.c_str());
+            lv_obj_set_style_text_font(id(lbl_now_name), fit_font(name.c_str(), fonts, 3, 148), 0);
+            lv_label_set_text(id(lbl_now_sub), sub.c_str());
+            // Without a second line the name moves down to the middle of the text area.
+            lv_obj_set_y(id(lbl_now_name), sub.empty() ? 7 : 2);
+            lv_obj_remove_flag(id(lbl_now_sub), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(id(now_prog), LV_OBJ_FLAG_HIDDEN);
+          }
+      - script.execute: update_progress
+
+  # Elapsed time, bar and total time of the progress row; once per second while it is shown.
+  - id: update_progress
+    then:
+      - lambda: |-
+          if (!id(progress_shown)) return;
+          float pos = id(sendspin_progress).state, dur = id(sendspin_duration).state;
+          if (std::isnan(dur) || dur <= 0) return;
+          if (std::isnan(pos) || pos < 0) pos = 0;
+          if (pos > dur) pos = dur;
+          auto mmss = [](float ms) {
+            const int s = (int) (ms / 1000);
+            char buf[12];
+            snprintf(buf, sizeof(buf), "%d:%02d", s / 60, s % 60);
+            return std::string(buf);
+          };
+          lv_label_set_text(id(lbl_prog_pos), mmss(pos).c_str());
+          lv_label_set_text(id(lbl_prog_dur), mmss(dur).c_str());
+          lv_bar_set_value(id(bar_prog), (int) (pos * 1000 / dur), LV_ANIM_OFF);
 
   # Back to the playing screen when something plays, else to the clock.
   - id: go_home
@@ -1704,6 +1768,32 @@ lvgl:
             widgets:
               - label: {id: lbl_now_name, text: "", height: 20, x: 6, y: 2, width: 148, long_mode: DOT, text_align: CENTER, text_font: f16m, text_color: 0xFFFFFF}
               - label: {id: lbl_now_sub, text: "", height: 15, x: 6, y: 21, width: 148, long_mode: DOT, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
+              - obj:
+                  id: now_prog
+                  styles: plain
+                  x: 0
+                  y: 20
+                  width: 160
+                  height: 16
+                  hidden: true
+                  widgets:
+                    - label: {id: lbl_prog_pos, text: "", x: 6, y: 1, width: 30, text_align: LEFT, text_font: f10m, text_color: 0xC4C4CC}
+                    - bar:
+                        id: bar_prog
+                        x: 36
+                        y: 6
+                        width: 88
+                        height: 3
+                        min_value: 0
+                        max_value: 1000
+                        value: 0
+                        radius: 1
+                        bg_color: 0x46464E
+                        bg_opa: COVER
+                        indicator:
+                          bg_color: 0xFFB020
+                          radius: 1
+                    - label: {id: lbl_prog_dur, text: "", x: 124, y: 1, width: 30, text_align: RIGHT, text_font: f10m, text_color: 0xC4C4CC}
         - obj:
             id: now_vol
             styles: plain
