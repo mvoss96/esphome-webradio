@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+
+#include <esp_heap_caps.h>
 
 namespace esphome::radio_ui {
 
@@ -27,6 +30,109 @@ const lv_font_t *fit_font(const char *text, const lv_font_t *const *fonts, int c
       return fonts[i];
   }
   return fonts[count - 1];
+}
+
+const lv_font_t *fit_lines(const char *text, const lv_font_t *const *fonts, int count, int max_width, int max_lines) {
+  for (int i = 0; i < count; i++) {
+    // Every word must fit on a line of its own, otherwise LVGL would break it.
+    bool words_fit = true;
+    const char *p = text;
+    while (*p != '\0' && words_fit) {
+      while (*p == ' ')
+        p++;
+      const char *end = p;
+      while (*end != '\0' && *end != ' ')
+        end++;
+      if (end > p) {
+        std::string word(p, end - p);
+        lv_point_t size;
+        lv_text_get_size(&size, word.c_str(), fonts[i], 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        words_fit = size.x <= max_width;
+      }
+      p = end;
+    }
+    lv_point_t size;
+    lv_text_get_size(&size, text, fonts[i], 0, 0, max_width, LV_TEXT_FLAG_NONE);
+    const int lines = (size.y + lv_font_get_line_height(fonts[i]) / 2) / lv_font_get_line_height(fonts[i]);
+    if (words_fit && lines <= max_lines)
+      return fonts[i];
+  }
+  return fonts[count - 1];
+}
+
+const lv_image_dsc_t *make_backdrop(const lv_image_dsc_t *src) {
+  static constexpr int W = 160, H = 128, BLUR = 3;
+  static constexpr float DARK = 0.33f;
+  static uint16_t *out = nullptr;
+  static uint8_t *rgb = nullptr, *tmp = nullptr;
+  static lv_image_dsc_t dsc;
+  if (src == nullptr || src->data == nullptr || src->header.cf != LV_COLOR_FORMAT_RGB565)
+    return nullptr;
+  const int sw = src->header.w, sh = src->header.h;
+  if (sw <= 0 || sh <= 0)
+    return nullptr;
+  if (out == nullptr) {
+    out = static_cast<uint16_t *>(heap_caps_malloc(W * H * 2, MALLOC_CAP_SPIRAM));
+    rgb = static_cast<uint8_t *>(heap_caps_malloc(W * H * 3, MALLOC_CAP_SPIRAM));
+    tmp = static_cast<uint8_t *>(heap_caps_malloc(W * H * 3, MALLOC_CAP_SPIRAM));
+    if (out == nullptr || rgb == nullptr || tmp == nullptr)
+      return nullptr;
+  }
+  // Scale to fill the screen (the overflowing side is cropped), nearest pixel; the blur
+  // smooths the enlarged pixels.
+  const int stride = src->header.stride ? src->header.stride : sw * 2;
+  const float scale = std::max(W / (float) sw, H / (float) sh);
+  const float ox = (sw * scale - W) / 2, oy = (sh * scale - H) / 2;
+  for (int y = 0; y < H; y++) {
+    const int sy = std::min(sh - 1, (int) ((y + oy) / scale));
+    const uint16_t *row = reinterpret_cast<const uint16_t *>(src->data + sy * stride);
+    for (int x = 0; x < W; x++) {
+      const uint16_t v = row[std::min(sw - 1, (int) ((x + ox) / scale))];
+      uint8_t *p = &rgb[(y * W + x) * 3];
+      p[0] = ((v >> 11) & 0x1F) * 255 / 31;
+      p[1] = ((v >> 5) & 0x3F) * 255 / 63;
+      p[2] = (v & 0x1F) * 255 / 31;
+    }
+  }
+  // Box blur: horizontal into tmp, vertical back into rgb; edges repeat the border pixel.
+  for (int pass = 0; pass < 2; pass++) {
+    const uint8_t *in = pass == 0 ? rgb : tmp;
+    uint8_t *dst = pass == 0 ? tmp : rgb;
+    const int len = pass == 0 ? W : H, lines = pass == 0 ? H : W;
+    for (int l = 0; l < lines; l++) {
+      for (int c = 0; c < 3; c++) {
+        auto at = [&](int i) {
+          i = std::max(0, std::min(len - 1, i));
+          return pass == 0 ? in[(l * W + i) * 3 + c] : in[(i * W + l) * 3 + c];
+        };
+        int sum = 0;
+        for (int i = -BLUR; i <= BLUR; i++)
+          sum += at(i);
+        for (int i = 0; i < len; i++) {
+          const uint8_t v = sum / (2 * BLUR + 1);
+          if (pass == 0)
+            dst[(l * W + i) * 3 + c] = v;
+          else
+            dst[(i * W + l) * 3 + c] = v;
+          sum += at(i + BLUR + 1) - at(i - BLUR);
+        }
+      }
+    }
+  }
+  for (int i = 0; i < W * H; i++) {
+    const uint8_t *p = &rgb[i * 3];
+    const uint8_t r = p[0] * DARK, g = p[1] * DARK, b = p[2] * DARK;
+    out[i] = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+  }
+  memset(&dsc, 0, sizeof(dsc));
+  dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+  dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+  dsc.header.w = W;
+  dsc.header.h = H;
+  dsc.header.stride = W * 2;
+  dsc.data_size = W * H * 2;
+  dsc.data = reinterpret_cast<const uint8_t *>(out);
+  return &dsc;
 }
 
 std::string gain_text(float value) {
