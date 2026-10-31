@@ -1792,6 +1792,7 @@ lvgl:
             y: 92
             width: 160
             height: 36
+            scrollable: false
             widgets:
               - label: {id: lbl_now_name, text: "", height: 20, x: 6, y: 2, width: 148, long_mode: DOT, text_align: CENTER, text_font: f16m, text_color: 0xFFFFFF}
               - label: {id: lbl_now_sub, text: "", height: 15, x: 6, y: 21, width: 148, long_mode: DOT, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
@@ -1828,13 +1829,14 @@ lvgl:
             y: 92
             width: 160
             height: 36
+            scrollable: false
             hidden: true
             widgets:
               - bar:
                   id: bar_vol
-                  x: 22
+                  x: 20
                   y: 11
-                  width: 86
+                  width: 82
                   height: 6
                   min_value: 0
                   max_value: 100
@@ -1845,7 +1847,7 @@ lvgl:
                   indicator:
                     bg_color: 0xFFB020
                     radius: 3
-              - label: {id: lbl_vol_pct, text: "", x: 112, y: 5, width: 44, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
+              - label: {id: lbl_vol_pct, text: "", x: 104, y: 5, width: 54, long_mode: CLIP, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
 
     # 2: Carousel for all menus, filled by render_menu / radio_ui::render.
     - id: carousel_page
