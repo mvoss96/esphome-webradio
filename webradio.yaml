@@ -1044,8 +1044,16 @@ script:
           lv_bar_set_value(id(bar_prog), (int) (pos * 1000 / dur), LV_ANIM_OFF);
           const int rem = (int) ((dur - pos) / 1000);
           char buf[16];
-          snprintf(buf, sizeof(buf), "-%d:%02d", rem / 60, rem % 60);
+          if (rem >= 3600)
+            snprintf(buf, sizeof(buf), "-%d:%02d:%02d", rem / 3600, rem / 60 % 60, rem % 60);
+          else
+            snprintf(buf, sizeof(buf), "-%d:%02d", rem / 60, rem % 60);
           lv_label_set_text(id(lbl_prog_rem), buf);
+          // The label is as wide as its text; the bar takes the rest of the row.
+          lv_obj_update_layout(id(lbl_prog_rem));
+          const int w = lv_obj_get_width(id(lbl_prog_rem));
+          lv_obj_set_x(id(lbl_prog_rem), 144 - w);
+          lv_obj_set_width(id(bar_prog), 144 - w - 8);
 
   # Back to the playing screen when something plays, else to the clock.
   - id: go_home
@@ -1813,7 +1821,7 @@ lvgl:
             scrollable: false
             hidden: true
             widgets:
-              - label: {id: lbl_prog_rem, text: "", x: 108, y: 2, width: 36, text_align: RIGHT, text_font: f13m, text_color: 0xE1E1E8}
+              - label: {id: lbl_prog_rem, text: "", x: 108, y: 2, width: SIZE_CONTENT, text_font: f13m, text_color: 0xE1E1E8}
               - bar:
                   id: bar_prog
                   x: 0
