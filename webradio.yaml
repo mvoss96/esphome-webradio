@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.10.1"
+    version: "1.11.0"
   on_boot:
     priority: -100
     then:
@@ -58,7 +58,7 @@ external_components:
     components: [equalizer, station_logos, radio_ui, radio_web]
     refresh: 10s
   # AirPlay receiver (hub, media source, text sensors, cover image).
-  - source: github://mvoss96/esphome-airplay@a9f77706264445e65365ae30ad8800904fedfeb1
+  - source: github://mvoss96/esphome-airplay@v0.2.0
     components: [airplay]
 
 # Decoders for the radio streams. FLAC comes from the media pipeline format.
@@ -787,10 +787,18 @@ binary_sensor:
           - script.execute: knob_hold
 
 text_sensor:
-  # Device name of the AirPlay sender, e.g. "Marcus' iPhone"; empty while nothing plays.
+  # Device name of the AirPlay sender, e.g. "Marcus' iPhone"; empty while nothing plays. Shown at the top
+  # left of the playing screen.
   - platform: airplay
     type: sender
+    id: airplay_sender
     name: AirPlay Sender
+    on_value:
+      - if:
+          condition:
+            lambda: "return id(airplay_active) && id(ui_page) == 1;"
+          then:
+            - script.execute: update_playing_layout
   - platform: airplay
     type: title
     id: airplay_title
@@ -1093,7 +1101,7 @@ script:
             return out;
           };
           const lv_font_t *fonts[3] = {id(f24t)->get_lv_font(), id(f20t)->get_lv_font(), id(f16m)->get_lv_font()};
-          std::string name, sub;
+          std::string name, sub, source;
           float duration = NAN, position = NAN;
           if (id(radio_active)) {
             const auto &names = id(station_names);
@@ -1106,6 +1114,7 @@ script:
             name = clean(air ? id(airplay_title).state : id(sendspin_title).state);
             sub = clean(air ? id(airplay_artist).state : id(sendspin_artist).state);
             if (air && name.empty()) name = "AirPlay";
+            source = air ? clean(id(airplay_sender).state) : "Music Assistant";
             duration = air ? id(airplay_duration).state : id(sendspin_duration).state;
             position = air ? id(airplay_progress).state : id(sendspin_progress).state;
           }
@@ -1143,7 +1152,11 @@ script:
           lv_obj_set_style_text_font(id(lbl_now_name), font, 0);
           lv_obj_set_height(id(lbl_now_name), title_h);
           const int sub_h = sub.empty() ? 0 : 22;
-          const int top = (108 - title_h - sub_h) / 2;
+          // Below the source line when it is shown.
+          const int top = std::max((108 - title_h - sub_h) / 2, source.empty() ? 0 : 16);
+          lv_label_set_text(id(lbl_now_source), source.c_str());
+          if (source.empty()) lv_obj_add_flag(id(lbl_now_source), LV_OBJ_FLAG_HIDDEN);
+          else lv_obj_remove_flag(id(lbl_now_source), LV_OBJ_FLAG_HIDDEN);
           lv_obj_set_y(id(lbl_now_name), top);
           lv_label_set_text(id(lbl_now_sub), sub.c_str());
           lv_obj_set_y(id(lbl_now_sub), top + title_h + 2);
@@ -2057,6 +2070,8 @@ lvgl:
         - image: {id: now_bg, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
         - label: {id: lbl_now_name, text: "", x: 8, y: 20, width: 144, height: 58, long_mode: DOT, text_font: f24t, text_color: 0xFFFFFF}
         - label: {id: lbl_now_sub, text: "", x: 8, y: 80, width: 144, height: 20, long_mode: DOT, text_font: f16m, text_color: 0xE1E1E8}
+        # Where the audio comes from: the AirPlay sender's device name or "Music Assistant"; empty for a station.
+        - label: {id: lbl_now_source, text: "", x: 8, y: 3, width: 120, height: 15, long_mode: DOT, text_font: f12m, text_color: 0xC4C4CC, hidden: true}
         - label: {id: pause_overlay, text: "", x: 132, y: 6, text_font: ti22, text_color: 0xFFFFFF, hidden: true}
         - obj:
             id: now_prog
