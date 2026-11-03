@@ -59,12 +59,14 @@ Per-device settings go under `substitutions:` in the device file:
 | Now playing | Volume | Main menu | Stop, then main menu |
 | Main menu | Move | Settings / back to what plays / play the station | Back to the clock or playing screen |
 | Settings | Move | Back / equalizer / edit the dim time / info | Back |
-| Equalizer | Select back arrow or band / change it | Back / edit on/off | Back |
+| Equalizer | Select band / change it | Edit on/off | Leave editing, then back |
 
 The main menu is one row: "Einstellungen" on the left, then the playing source (Sendspin) if
 any, then all stations. It opens on the playing station or source, otherwise on the last
 station. The playing tile has an accent border.
 
+Settings, equalizer and info are lists below a header with the title and the time. A white bar
+marks the selection; it turns amber while a value is edited (the dim time, an equalizer band).
 The equalizer page (Einstellungen → Equalizer) shows bass, mid and treble as sliders.
 
 While the display is dimmed, the first input only wakes it. The dim time is a setting in the
@@ -72,7 +74,9 @@ settings menu (and the Home Assistant entity "Display abdunkeln nach"); 0 turns 
 
 ## Web page
 
-`http://<radio>/` shows the playing station, a stop/play button, the volume and a tile per station.
+`http://<radio>/` shows what the display shows: the playing station or source (AirPlay, Sendspin) with
+title, artist, cover and the playing bars, a button (stop for a station, pause/resume for AirPlay and Sendspin), the volume
+and a tile per station.
 "Einstellungen" (`/#einstellungen`) sets bass, mid, treble and the dim time.
 "Sender verwalten" (`/#sender`) edits the list: search radio-browser.info, add, rename, drag to sort,
 remove, then "Aufs Radio übertragen". Search and logos are loaded by the browser, not by the radio.
@@ -81,13 +85,25 @@ API used by the page:
 
 | Request | Body / response |
 |---------|-----------------|
-| `GET /api/status` | JSON: `station`, `playing`, `sendspin`, `volume`, `muted`, `ha`, `bass`, `mid`, `treble`, `dim` |
+| `GET /api/status` | JSON: `station`, `source` (`""`, `radio`, `airplay`, `sendspin`), `paused`, `live` (a station or a stream without an end), `title`, `artist`, `volume`, `muted`, `ha`, `bass`, `mid`, `treble`, `dim`, `cover` (id of the cover, 0 for none), `page` (id of the served page; an open page reloads when it changes) |
+| `GET /api/cover` | the cover the display shows, as BMP |
 | `GET /api/stations` | one `name<TAB>stream-url<TAB>logo-url` line per station |
 | `POST /api/stations` | same text format; replaces the list |
 | `POST /api/play` | station index |
 | `POST /api/volume` | 0–100 |
 | `POST /api/stop` | – |
+| `POST /api/pause` | – (AirPlay and Sendspin) |
+| `POST /api/resume` | – |
 | `POST /api/setting` | `key=value` lines; keys `bass`, `mid`, `treble` (dB), `dim` (seconds) |
+
+To work on the page without flashing, serve it from the repo and let it talk to a running radio:
+
+```bash
+python tools/web_dev_server.py <radio address>
+```
+
+Then open `http://localhost:8765/`. Changes to `components/radio_web/index.html` only need a reload;
+only changes to the API need a new firmware.
 
 ## Home Assistant
 
@@ -103,7 +119,7 @@ whether Home Assistant is connected. Actions:
 |-----------|---------|
 | `equalizer` | Speaker platform with biquad filters between the media player and the I²S speaker. |
 | `station_logos` | Looks up station logos (radio-browser.info), resizes them via wsrv.nl, stores them in the `logos` flash partition and scales only the logos on screen into four display buffers. |
-| `radio_ui` | C++ helpers for the LVGL carousel. |
+| `radio_ui` | C++ helpers for the LVGL pages: main menu carousel, playing background, page transition. |
 | `radio_web` | The web page and its API on ESPHome's web server. |
 
 ## Memory

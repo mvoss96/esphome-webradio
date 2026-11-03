@@ -10,6 +10,7 @@
 namespace esphome::radio_ui {
 
 // Colours. Three brightness levels only, because the TN panel loses dark greys at an angle.
+static constexpr uint32_t BG = 0x060608;
 static constexpr uint32_t TEXT = 0xFFFFFF;
 static constexpr uint32_t SUB = 0xC4C4CC;
 static constexpr uint32_t DIM = 0x787880;
@@ -35,17 +36,14 @@ static const char *const ICON_CPU = "";
 static const char *const ICON_VOLUME = "";
 static const char *const ICON_MUTE = "";
 
-/// One tile of a carousel.
+/// One tile of the main menu.
 struct Item {
-  enum Kind { BACK, ICON, STATION, STEPS };
+  enum Kind { ICON, STATION };
   Kind kind{ICON};
   const char *icon{""};
   std::string label;
   std::string sub;
   int station{-1};  // index into the station list for STATION
-  int step{0};               // STEPS: current step
-  int step_count{0};         // STEPS: number of steps
-  std::string value_text;    // STEPS: current value, shown large while editing
   bool playing{false};           // STATION / ICON: tile background with an accent border
   const char *letter{nullptr};   // ICON while playing: letter inside the screen of the cast icon
   const lv_image_dsc_t *cover{nullptr};  // ICON while playing: cover shown instead of the icon
@@ -68,18 +66,14 @@ struct Slot {
   lv_obj_t *logo_img;
   lv_obj_t *logo_lbl;
   lv_obj_t *icon;
-  lv_obj_t *value_lbl;
 };
 
 /// All widgets of the carousel page.
 struct Carousel {
   lv_obj_t *name;
   lv_obj_t *sub;
-  lv_obj_t *chev_left;
-  lv_obj_t *chev_right;
   Slot center, left, right;
-  lv_obj_t *steps[DIM_STEP_COUNT];  // step dots below the value while editing STEPS
-  const lv_font_t *name_fonts[3];   // largest first
+  const lv_font_t *name_fonts[3];  // largest first
 };
 
 /// Largest font of the list in which text fits into max_width pixels.
@@ -97,9 +91,11 @@ const lv_image_dsc_t *make_backdrop(const lv_image_dsc_t *src);
 std::string gain_text(float value);
 
 /// Show items[sel] in the centre with its neighbours, name and sub text.
-/// While editing, the neighbours are hidden and arrows appear left and right.
 /// Station logos use the display buffer slots 0 (centre), 1 (left) and 2 (right).
-void render(const Carousel &c, const std::vector<Item> &items, int sel, bool editing,
+void render(const Carousel &c, const std::vector<Item> &items, int sel,
             station_logos::StationLogos *logos, const std::vector<std::string> &names);
+
+/// Page transition: body starts 10 px lower and slides up in 220 ms (ease out).
+void settle_in(lv_obj_t *body);
 
 }  // namespace esphome::radio_ui

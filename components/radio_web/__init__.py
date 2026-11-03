@@ -15,14 +15,18 @@ DEPENDENCIES = ["network"]
 
 CONF_STATIONS = "stations"
 CONF_STATUS = "status"
+CONF_COVER = "cover"
 CONF_ON_SAVE = "on_save"
 CONF_ON_PLAY = "on_play"
 CONF_ON_VOLUME = "on_volume"
 CONF_ON_STOP = "on_stop"
+CONF_ON_PAUSE = "on_pause"
+CONF_ON_RESUME = "on_resume"
 CONF_ON_SETTING = "on_setting"
 
 radio_web_ns = cg.esphome_ns.namespace("radio_web")
 RadioWeb = radio_web_ns.class_("RadioWeb", cg.Component)
+Image = cg.esphome_ns.namespace("image").class_("Image")
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -30,10 +34,14 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(CONF_WEB_SERVER_BASE_ID): cv.use_id(web_server_base.WebServerBase),
         cv.Required(CONF_STATIONS): cv.returning_lambda,
         cv.Required(CONF_STATUS): cv.returning_lambda,
+        # Returns the image shown as cover (image::Image *), nullptr for none.
+        cv.Optional(CONF_COVER): cv.returning_lambda,
         cv.Optional(CONF_ON_SAVE): automation.validate_automation(single=True),
         cv.Optional(CONF_ON_PLAY): automation.validate_automation(single=True),
         cv.Optional(CONF_ON_VOLUME): automation.validate_automation(single=True),
         cv.Optional(CONF_ON_STOP): automation.validate_automation(single=True),
+        cv.Optional(CONF_ON_PAUSE): automation.validate_automation(single=True),
+        cv.Optional(CONF_ON_RESUME): automation.validate_automation(single=True),
         cv.Optional(CONF_ON_SETTING): automation.validate_automation(single=True),
     }
 ).extend(cv.COMPONENT_SCHEMA)
@@ -57,12 +65,18 @@ async def to_code(config):
     cg.add(var.set_stations_lambda(stations))
     status = await cg.process_lambda(config[CONF_STATUS], [], return_type=cg.std_string)
     cg.add(var.set_status_lambda(status))
+    if CONF_COVER in config:
+        cg.add_define("USE_RADIO_WEB_COVER")
+        cover = await cg.process_lambda(config[CONF_COVER], [], return_type=Image.operator("ptr"))
+        cg.add(var.set_cover_lambda(cover))
 
     for key, trigger, args in (
         (CONF_ON_SAVE, var.get_save_trigger(), [(cg.std_string, "text")]),
         (CONF_ON_PLAY, var.get_play_trigger(), [(cg.int_, "index")]),
         (CONF_ON_VOLUME, var.get_volume_trigger(), [(cg.int_, "volume")]),
         (CONF_ON_STOP, var.get_stop_trigger(), []),
+        (CONF_ON_PAUSE, var.get_pause_trigger(), []),
+        (CONF_ON_RESUME, var.get_resume_trigger(), []),
         (CONF_ON_SETTING, var.get_setting_trigger(), [(cg.std_string, "key"), (cg.float_, "value")]),
     ):
         if conf := config.get(key):

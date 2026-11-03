@@ -248,7 +248,7 @@ static const lv_image_dsc_t *cover_tile(const lv_image_dsc_t *src, int slot, int
   return &d;
 }
 
-static void render_slot(const Slot &s, int slot, const Item *it, bool center, bool editing,
+static void render_slot(const Slot &s, int slot, const Item *it, bool center,
                         station_logos::StationLogos *logos, const std::vector<std::string> &names) {
   if (it == nullptr) {
     hide(s.root);
@@ -257,7 +257,6 @@ static void render_slot(const Slot &s, int slot, const Item *it, bool center, bo
   show(s.root);
   hide(s.logo_box);
   hide(s.icon);
-  hide(s.value_lbl);
   // No whole-object opacity here: it would make LVGL allocate a layer buffer on every
   // redraw. Side logos come pre-dimmed from station_logos, side icons use the dim grey.
   switch (it->kind) {
@@ -273,7 +272,6 @@ static void render_slot(const Slot &s, int slot, const Item *it, bool center, bo
       mark_playing(s, it->playing);
       break;
     }
-    case Item::BACK:
     case Item::ICON: {
       // The playing source with a cover: the cover replaces the icon on the tile.
       const lv_image_dsc_t *cover =
@@ -308,27 +306,13 @@ static void render_slot(const Slot &s, int slot, const Item *it, bool center, bo
           lv_obj_align(s.logo_lbl, LV_ALIGN_CENTER, center ? 6 : 3, 0);
         }
       }
-      uint32_t c = center ? (it->kind == Item::BACK ? SUB : TEXT) : DIM;
-      lv_obj_set_style_text_color(s.icon, col(c), 0);
-      break;
-    }
-    case Item::STEPS: {
-      // An icon tile like the others; while editing, the value replaces the icon.
-      if (center && editing) {
-        show(s.value_lbl);
-        lv_label_set_text(s.value_lbl, it->value_text.c_str());
-        lv_obj_set_style_text_color(s.value_lbl, col(ACCENT), 0);
-      } else {
-        show(s.icon);
-        lv_label_set_text(s.icon, it->icon);
-        lv_obj_set_style_text_color(s.icon, col(center ? TEXT : DIM), 0);
-      }
+      lv_obj_set_style_text_color(s.icon, col(center ? TEXT : DIM), 0);
       break;
     }
   }
 }
 
-void render(const Carousel &c, const std::vector<Item> &items, int sel, bool editing,
+void render(const Carousel &c, const std::vector<Item> &items, int sel,
             station_logos::StationLogos *logos, const std::vector<std::string> &names) {
   const int n = (int) items.size();
   if (n == 0)
@@ -339,16 +323,9 @@ void render(const Carousel &c, const std::vector<Item> &items, int sel, bool edi
     sel = n - 1;
   const Item &cur = items[sel];
 
-  render_slot(c.center, 0, &cur, true, editing, logos, names);
-  render_slot(c.left, 1, (!editing && sel > 0) ? &items[sel - 1] : nullptr, false, false, logos, names);
-  render_slot(c.right, 2, (!editing && sel + 1 < n) ? &items[sel + 1] : nullptr, false, false, logos, names);
-  if (editing) {
-    show(c.chev_left);
-    show(c.chev_right);
-  } else {
-    hide(c.chev_left);
-    hide(c.chev_right);
-  }
+  render_slot(c.center, 0, &cur, true, logos, names);
+  render_slot(c.left, 1, sel > 0 ? &items[sel - 1] : nullptr, false, logos, names);
+  render_slot(c.right, 2, sel + 1 < n ? &items[sel + 1] : nullptr, false, logos, names);
 
   lv_label_set_text(c.name, cur.label.c_str());
   lv_obj_set_style_text_font(c.name, fit_font(cur.label.c_str(), c.name_fonts, 3, 148), 0);
@@ -357,23 +334,21 @@ void render(const Carousel &c, const std::vector<Item> &items, int sel, bool edi
   } else {
     show(c.sub);
     lv_label_set_text(c.sub, cur.sub.c_str());
-    lv_obj_set_style_text_color(c.sub, col(editing ? ACCENT : SUB), 0);
+    lv_obj_set_style_text_color(c.sub, col(SUB), 0);
   }
+}
 
-  // Step dots below the value while a STEPS item is edited; the current step is larger.
-  for (int k = 0; k < DIM_STEP_COUNT; k++) {
-    if (!editing || cur.kind != Item::STEPS || k >= cur.step_count) {
-      hide(c.steps[k]);
-      continue;
-    }
-    const bool on = k == cur.step;
-    const int r = on ? 3 : 2;
-    const int x = 30 + 100 * k / std::max(1, cur.step_count - 1);
-    show(c.steps[k]);
-    lv_obj_set_size(c.steps[k], 2 * r, 2 * r);
-    lv_obj_set_pos(c.steps[k], x - r, 72 - r);
-    lv_obj_set_style_bg_color(c.steps[k], col(on ? ACCENT : DIM), 0);
-  }
+void settle_in(lv_obj_t *body) {
+  lv_anim_delete(body, nullptr);
+  lv_obj_set_y(body, 10);
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, body);
+  lv_anim_set_values(&a, 10, 0);
+  lv_anim_set_duration(&a, 220);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+  lv_anim_set_exec_cb(&a, [](void *o, int32_t v) { lv_obj_set_y((lv_obj_t *) o, v); });
+  lv_anim_start(&a);
 }
 
 }  // namespace esphome::radio_ui
