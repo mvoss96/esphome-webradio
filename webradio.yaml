@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.9.13-airplay"
+    version: "1.10.0"
   on_boot:
     priority: -100
     then:
@@ -57,6 +57,9 @@ external_components:
   - source: github://mvoss96/esphome-webradio@main
     components: [equalizer, station_logos, radio_ui, radio_web]
     refresh: 10s
+  # AirPlay receiver (hub, media source, text sensors, cover image).
+  - source: github://mvoss96/esphome-airplay@e65d8f0abd5270d81efa449b875c60c775ded39a
+    components: [airplay]
 
 # Decoders for the radio streams. FLAC comes from the media pipeline format.
 audio:
@@ -453,7 +456,8 @@ speaker:
     dac_type: external
     channel: mono
     timeout: never
-    buffer_duration: 100ms
+    # Covers short stalls of the AirPlay task, e.g. during fast volume changes.
+    buffer_duration: 500ms
 
   # EQ tuned for the Visaton FRS 8 M in the closed 1 L case (box resonance ~180 Hz).
   - platform: equalizer
@@ -584,6 +588,7 @@ sendspin:
 airplay:
   name: Web Radio
   task_stack_in_psram: true
+  airplay2: true
 
 media_source:
   - platform: sendspin
@@ -595,6 +600,7 @@ media_source:
     id: http_source
   - platform: airplay
     id: airplay_source
+    output_queue: 400ms
 
 media_player:
   - platform: speaker_source
@@ -1920,7 +1926,6 @@ image:
     id: airplay_cover
     type: RGB565
     resize: 74x74
-    max_size: 300kB
     on_image_update:
       - lambda: |-
           id(airplay_has_cover) = true;
