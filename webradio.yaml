@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.10.0"
+    version: "1.10.1"
   on_boot:
     priority: -100
     then:
@@ -58,7 +58,7 @@ external_components:
     components: [equalizer, station_logos, radio_ui, radio_web]
     refresh: 10s
   # AirPlay receiver (hub, media source, text sensors, cover image).
-  - source: github://mvoss96/esphome-airplay@e65d8f0abd5270d81efa449b875c60c775ded39a
+  - source: github://mvoss96/esphome-airplay@a9f77706264445e65365ae30ad8800904fedfeb1
     components: [airplay]
 
 # Decoders for the radio streams. FLAC comes from the media pipeline format.
@@ -455,7 +455,6 @@ speaker:
     i2s_audio_id: i2s_output
     dac_type: external
     channel: mono
-    timeout: never
     # Covers short stalls of the AirPlay task, e.g. during fast volume changes.
     buffer_duration: 500ms
 
