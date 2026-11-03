@@ -316,6 +316,11 @@ void EqualizerSpeaker::loop() {
     case speaker::STATE_STARTING:
       if (this->output_speaker_->is_running()) {
         this->state_ = speaker::STATE_RUNNING;
+      } else if (this->output_speaker_->is_stopped()) {
+        // A start that came while the output was still stopping is dropped by it (seen when the
+        // media player switches sources): start it again now that it has stopped.
+        this->output_speaker_->set_audio_stream_info(this->audio_stream_info_);
+        this->output_speaker_->start();
       } else if (App.get_loop_component_start_time() - this->state_start_ms_ > START_TIMEOUT_MS) {
         ESP_LOGW(TAG, "Output speaker did not start within %u ms", static_cast<unsigned>(START_TIMEOUT_MS));
         this->state_ = speaker::STATE_STOPPING;
