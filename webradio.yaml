@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.11.2"
+    version: "1.11.3"
   on_boot:
     priority: -100
     then:
@@ -1235,11 +1235,11 @@ script:
       m: int
       s: int
     then:
-      # The tiles settle into place when coming from the playing screen, info or equalizer, or when
+      # The tiles settle into place when coming from the playing screen or equalizer, or when
       # switching between main menu and settings.
       - if:
           condition:
-            lambda: "return id(ui_page) == 1 || id(ui_page) == 3 || id(ui_page) == 4 || (id(ui_page) == 2 && id(menu) != m);"
+            lambda: "return id(ui_page) == 1 || id(ui_page) == 4 || (id(ui_page) == 2 && id(menu) != m);"
           then:
             - script.execute:
                 id: menu_settle
@@ -1361,54 +1361,18 @@ script:
                 render(c, items, id(menu_sel), id(logos), names);
 
   # Settings as a list: the pill marks the selected row and turns amber while the dim time is
-  # edited. When the selection changes on the visible page, the pill slides there in 120 ms and
-  # the row colours flip half way.
+  # edited. It jumps to the selected row; set_ink moves against it, see the settings_page widgets.
   - id: render_settings
     then:
       - lambda: |-
           using namespace esphome::radio_ui;
-          static constexpr int ROW_Y0 = 24, ROW_H = 24;
-          static int shown = -1, target = 0;
-          static int32_t from_y = 0;
-          static bool flipped = false;
-          static auto paint = [](int on) {
-            lv_obj_t *icons[4] = {id(set_icon0), id(set_icon1), id(set_icon2), id(set_icon3)};
-            lv_obj_t *labels[4] = {id(set_lbl0), id(set_lbl1), id(set_lbl2), id(set_lbl3)};
-            for (int k = 0; k < 4; k++) {
-              lv_obj_set_style_text_color(icons[k], lv_color_hex(k == on ? BG : TEXT), 0);
-              lv_obj_set_style_text_color(labels[k], lv_color_hex(k == on ? BG : TEXT), 0);
-            }
-            lv_obj_set_style_text_color(id(set_val2), lv_color_hex(on == 2 ? BG : SUB), 0);
-            lv_obj_set_style_text_color(id(set_chev1), lv_color_hex(on == 1 ? TRACK : DIM), 0);
-            lv_obj_set_style_text_color(id(set_chev3), lv_color_hex(on == 3 ? TRACK : DIM), 0);
-            lv_obj_set_style_bg_color(id(set_pill), lv_color_hex(id(menu_edit) ? ACCENT : TEXT), 0);
-          };
-          lv_label_set_text(id(set_val2), dim_text(id(dim_after).state).c_str());
-          const int sel = id(menu_sel);
-          target = sel;
-          if (shown < 0 || shown == sel || lv_screen_active() != id(settings_page)->obj) {
-            lv_anim_delete(id(set_pill), nullptr);
-            lv_obj_set_y(id(set_pill), ROW_Y0 + sel * ROW_H);
-            paint(sel);
-          } else {
-            from_y = lv_obj_get_y(id(set_pill));
-            flipped = false;
-            lv_anim_t a;
-            lv_anim_init(&a);
-            lv_anim_set_var(&a, id(set_pill));
-            lv_anim_set_values(&a, 0, 256);
-            lv_anim_set_duration(&a, 120);
-            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-            lv_anim_set_exec_cb(&a, [](void *o, int32_t g) {
-              lv_obj_set_y((lv_obj_t *) o, from_y + (ROW_Y0 + target * ROW_H - from_y) * g / 256);
-              if (g >= 128 && !flipped) {
-                flipped = true;
-                paint(target);
-              }
-            });
-            lv_anim_start(&a);
-          }
-          shown = sel;
+          const int32_t y = 24 + id(menu_sel) * 24;
+          lv_obj_set_y(id(set_pill), y);
+          lv_obj_set_y(id(set_ink), -y);
+          lv_obj_set_style_bg_color(id(set_pill), lv_color_hex(id(menu_edit) ? ACCENT : TEXT), 0);
+          const std::string val = dim_text(id(dim_after).state);
+          lv_label_set_text(id(set_val2), val.c_str());
+          lv_label_set_text(id(set_val2_ink), val.c_str());
 
   # Move the selection by dir within the current menu.
   - id: clamp_sel
@@ -1437,7 +1401,6 @@ script:
           snprintf(buf, sizeof(buf), "%u", (unsigned) id(station_names).size());
           lv_label_set_text(id(lbl_info_count), buf);
       - lvgl.page.show: info_page
-      - lambda: esphome::radio_ui::settle_in(id(info_body));
       - script.execute: menu_timeout
 
   # One level up: settings go to the main menu, info to the settings, the main menu goes home.
@@ -2012,6 +1975,7 @@ lvgl:
   pages:
     - id: boot_page
       styles: page_style
+      scrollable: false
       widgets:
         - label: {text: "", x: 0, y: 20, width: 160, text_align: CENTER, text_font: ti40, text_color: 0xFFFFFF}
         - label: {text: "Web Radio", x: 0, y: 68, width: 160, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
@@ -2022,6 +1986,7 @@ lvgl:
     # 0: Clock. Turning shows the volume row instead of weekday and date.
     - id: idle_page
       styles: page_style
+      scrollable: false
       widgets:
         - label: {id: lbl_idle_time, text: "--:--", x: 0, y: 17, width: 160, text_align: CENTER, text_font: f44r, text_color: 0xFFFFFF}
         - obj:
@@ -2212,6 +2177,7 @@ lvgl:
     # 2 with menu 1: Settings as a list, see render_settings.
     - id: settings_page
       styles: page_style
+      scrollable: false
       widgets:
         - label: {text: "Einstellungen", x: 8, y: 4, text_font: f13m, text_color: 0xFFFFFF}
         - label: {id: hdr_time_set, text: "", x: 112, y: 5, width: 40, text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
@@ -2225,51 +2191,77 @@ lvgl:
             height: 128
             scrollable: false
             widgets:
-              - obj: {id: set_pill, x: 4, y: 48, width: 152, height: 24, radius: 12, bg_color: 0xFFFFFF, bg_opa: COVER, border_width: 0, pad_all: 0}
-              - label: {id: set_icon0, text: "", x: 12, y: 28, text_font: ti16, text_color: 0xFFFFFF}
-              - label: {id: set_lbl0, text: "Zurück", x: 34, y: 29, text_font: f13m, text_color: 0xFFFFFF}
-              - label: {id: set_icon1, text: "", x: 12, y: 52, text_font: ti16, text_color: 0xFFFFFF}
-              - label: {id: set_lbl1, text: "Equalizer", x: 34, y: 53, text_font: f13m, text_color: 0xFFFFFF}
-              - label: {id: set_chev1, text: "", x: 136, y: 52, text_font: ti16, text_color: 0x787880}
-              - label: {id: set_icon2, text: "", x: 12, y: 76, text_font: ti16, text_color: 0xFFFFFF}
-              - label: {id: set_lbl2, text: "Abdunkeln", x: 34, y: 77, text_font: f13m, text_color: 0xFFFFFF}
-              - label: {id: set_val2, text: "", x: 92, y: 78, width: 56, text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
-              - label: {id: set_icon3, text: "", x: 12, y: 100, text_font: ti16, text_color: 0xFFFFFF}
-              - label: {id: set_lbl3, text: "Info", x: 34, y: 101, text_font: f13m, text_color: 0xFFFFFF}
-              - label: {id: set_chev3, text: "", x: 136, y: 100, text_font: ti16, text_color: 0x787880}
+              - label: {text: "", x: 12, y: 28, text_font: ti16, text_color: 0xFFFFFF}
+              - label: {text: "Zurück", x: 34, y: 28, text_font: f13m, text_color: 0xFFFFFF}
+              - label: {text: "", x: 12, y: 52, text_font: ti16, text_color: 0xFFFFFF}
+              - label: {text: "Equalizer", x: 34, y: 52, text_font: f13m, text_color: 0xFFFFFF}
+              - label: {text: "", x: 136, y: 52, text_font: ti16, text_color: 0x787880}
+              - label: {text: "", x: 12, y: 76, text_font: ti16, text_color: 0xFFFFFF}
+              - label: {text: "Abdunkeln", x: 34, y: 76, text_font: f13m, text_color: 0xFFFFFF}
+              - label: {id: set_val2, text: "", x: 92, y: 76, width: 56, text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
+              - label: {text: "", x: 12, y: 100, text_font: ti16, text_color: 0xFFFFFF}
+              - label: {text: "Info", x: 34, y: 100, text_font: f13m, text_color: 0xFFFFFF}
+              - label: {text: "", x: 136, y: 100, text_font: ti16, text_color: 0x787880}
+              # The pill lies above the rows and holds a dark copy of them in set_ink, shifted against
+              # the pill so the copy lines up with the rows. The rows themselves are never recoloured.
+              - obj:
+                  id: set_pill
+                  x: 4
+                  y: 48
+                  width: 152
+                  height: 24
+                  radius: 12
+                  bg_color: 0xFFFFFF
+                  bg_opa: COVER
+                  border_width: 0
+                  pad_all: 0
+                  scrollable: false
+                  widgets:
+                    - obj:
+                        id: set_ink
+                        styles: plain
+                        x: -4
+                        y: -48
+                        width: 160
+                        height: 128
+                        scrollable: false
+                        widgets:
+                          - label: {text: "", x: 12, y: 28, text_font: ti16, text_color: 0x060608}
+                          - label: {text: "Zurück", x: 34, y: 28, text_font: f13m, text_color: 0x060608}
+                          - label: {text: "", x: 12, y: 52, text_font: ti16, text_color: 0x060608}
+                          - label: {text: "Equalizer", x: 34, y: 52, text_font: f13m, text_color: 0x060608}
+                          - label: {text: "", x: 136, y: 52, text_font: ti16, text_color: 0x46464E}
+                          - label: {text: "", x: 12, y: 76, text_font: ti16, text_color: 0x060608}
+                          - label: {text: "Abdunkeln", x: 34, y: 76, text_font: f13m, text_color: 0x060608}
+                          - label: {id: set_val2_ink, text: "", x: 92, y: 76, width: 56, text_align: RIGHT, text_font: f12m, text_color: 0x060608}
+                          - label: {text: "", x: 12, y: 100, text_font: ti16, text_color: 0x060608}
+                          - label: {text: "Info", x: 34, y: 100, text_font: f13m, text_color: 0x060608}
+                          - label: {text: "", x: 136, y: 100, text_font: ti16, text_color: 0x46464E}
 
     # 3: Info, all values on one page. Click or hold returns to the menu.
     - id: info_page
       styles: page_style
+      scrollable: false
       widgets:
         - label: {text: "Info", x: 8, y: 4, text_font: f13m, text_color: 0xFFFFFF}
         - label: {id: hdr_time_info, text: "", x: 112, y: 5, width: 40, text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
-        # Everything below the header in one box, so the page can settle in (radio_ui::settle_in).
-        - obj:
-            id: info_body
-            styles: plain
-            x: 0
-            y: 0
-            width: 160
-            height: 128
-            scrollable: false
-            widgets:
-              - label: {text: "WLAN", x: 8, y: 25, text_font: f12m, text_color: 0xC4C4CC}
-              - label: {id: lbl_info_ssid, text: "", height: 15, x: 60, y: 25, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
-              - label: {text: "Signal", x: 8, y: 42, text_font: f12m, text_color: 0xC4C4CC}
-              - label: {id: lbl_info_rssi, text: "", height: 15, x: 60, y: 42, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
-              - label: {text: "IP", x: 8, y: 59, text_font: f12m, text_color: 0xC4C4CC}
-              - label: {id: lbl_info_ip, text: "", height: 15, x: 60, y: 59, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
-              - label: {text: "HA", x: 8, y: 76, text_font: f12m, text_color: 0xC4C4CC}
-              - label: {id: lbl_info_ha, text: "", height: 15, x: 60, y: 76, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
-              - label: {text: "Firmware", x: 8, y: 93, text_font: f12m, text_color: 0xC4C4CC}
-              - label: {id: lbl_info_version, text: "", height: 15, x: 60, y: 93, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
-              - label: {text: "Sender", x: 8, y: 110, text_font: f12m, text_color: 0xC4C4CC}
-              - label: {id: lbl_info_count, text: "", height: 15, x: 60, y: 110, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "WLAN", x: 8, y: 25, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_ssid, text: "", height: 15, x: 60, y: 25, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "Signal", x: 8, y: 42, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_rssi, text: "", height: 15, x: 60, y: 42, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "IP", x: 8, y: 59, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_ip, text: "", height: 15, x: 60, y: 59, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "HA", x: 8, y: 76, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_ha, text: "", height: 15, x: 60, y: 76, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "Firmware", x: 8, y: 93, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_version, text: "", height: 15, x: 60, y: 93, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "Sender", x: 8, y: 110, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_count, text: "", height: 15, x: 60, y: 110, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
 
     # 4: Equalizer: bass, mid and treble, see render_eq.
     - id: eq_page
       styles: page_style
+      scrollable: false
       widgets:
         - label: {text: "Equalizer", x: 8, y: 4, text_font: f13m, text_color: 0xFFFFFF}
         - label: {id: hdr_time_eq, text: "", x: 112, y: 5, width: 40, text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
@@ -2302,6 +2294,7 @@ lvgl:
 
     - id: ota_page
       styles: page_style
+      scrollable: false
       widgets:
         - label: {id: lbl_ota_title, text: "Update", x: 0, y: 30, width: 160, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
         - label: {id: lbl_ota_sub, text: "Firmware wird installiert", x: 0, y: 50, width: 160, text_align: CENTER, text_font: f11m, text_color: 0xC4C4CC}
