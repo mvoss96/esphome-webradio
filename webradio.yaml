@@ -57,9 +57,8 @@ external_components:
   - source: github://mvoss96/esphome-webradio@main
     components: [equalizer, station_logos, radio_ui, radio_web]
     refresh: 10s
-  # AirPlay receiver (hub, media source, text sensors, cover image). Pinned to a commit of the
-  # homekit branch: HomeKit pairing, so the radio can be added to the Apple Home app.
-  - source: github://mvoss96/esphome-airplay@7692f1913b5a5ccecb53a0d403e7239d97f603ba
+  # AirPlay receiver (hub, media source, text sensors, cover image).
+  - source: github://mvoss96/esphome-airplay@v0.3.0
     components: [airplay]
 
 # Decoders for the radio streams. FLAC comes from the media pipeline format.
