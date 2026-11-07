@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.14.0"
+    version: "1.15.0"
   on_boot:
     priority: -100
     then:
@@ -58,7 +58,7 @@ external_components:
     components: [equalizer, station_logos, radio_ui, radio_web]
     refresh: 10s
   # AirPlay receiver (hub, media source, text sensors, cover image).
-  - source: github://mvoss96/esphome-airplay@v0.5.0
+  - source: github://mvoss96/esphome-airplay@v0.6.0
     components: [airplay]
 
 # Decoders for the radio streams. FLAC comes from the media pipeline format.
