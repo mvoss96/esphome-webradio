@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.15.0"
+    version: "1.15.1"
   on_boot:
     priority: -100
     then:
@@ -431,17 +431,14 @@ ota:
     on_end:
       - lambda: |-
           lv_label_set_text(id(lbl_ota_title), "Update fertig");
-          lv_label_set_text(id(lbl_ota_sub), "Startet neu …");
           lv_bar_set_value(id(bar_ota), 100, LV_ANIM_OFF);
           lv_obj_add_flag(id(lbl_ota_pct), LV_OBJ_FLAG_HIDDEN);
-          lv_obj_add_flag(id(lbl_ota_foot), LV_OBJ_FLAG_HIDDEN);
           lv_task_handler();
     on_error:
       - lambda: id(i2s_speaker).set_mute_state(false);
       # The bar stays where it stopped and turns grey; the old firmware keeps running.
       - lambda: |-
           lv_label_set_text(id(lbl_ota_title), "Update fehlgeschlagen");
-          lv_label_set_text(id(lbl_ota_sub), "Läuft weiter mit " ESPHOME_PROJECT_VERSION);
           lv_obj_set_style_bg_color(id(bar_ota), lv_color_hex(0x787880), LV_PART_INDICATOR);
           lv_obj_set_style_text_color(id(lbl_ota_pct), lv_color_hex(0x787880), 0);
 
@@ -488,6 +485,7 @@ switch:
   - platform: template
     name: "EQ Enabled"
     id: eq_enabled
+    entity_category: config
     optimistic: true
     restore_mode: ALWAYS_ON
     turn_on_action:
@@ -518,6 +516,7 @@ number:
   - platform: template
     name: "EQ Bass"
     id: eq_bass
+    entity_category: config
     min_value: 0
     max_value: 9
     step: 0.5
@@ -542,6 +541,7 @@ number:
   - platform: template
     name: "EQ Mid"
     id: eq_mid
+    entity_category: config
     min_value: -12
     max_value: 6
     step: 0.5
@@ -560,6 +560,7 @@ number:
   - platform: template
     name: "EQ Treble"
     id: eq_treble
+    entity_category: config
     min_value: -12
     max_value: 6
     step: 0.5
@@ -617,6 +618,7 @@ media_player:
     on_play:
       - script.stop: idle_timeout
       - lvgl.widget.hide: pause_overlay
+      - lvgl.widget.show: [ind0, ind1, ind2]
       # The cover is shown and hidden only by the Sendspin image events; it can arrive
       # before playback starts, so hiding it here lost it.
       - globals.set:
@@ -638,12 +640,14 @@ media_player:
           condition:
             lambda: "return !id(radio_active);"
           then:
+            - lvgl.widget.hide: [ind0, ind1, ind2]
             - lvgl.widget.show: pause_overlay
     on_idle:
       - globals.set:
           id: is_now_playing
           value: 'false'
       - lvgl.widget.hide: pause_overlay
+      - lvgl.widget.show: [ind0, ind1, ind2]
       - if:
           condition:
             lambda: "return id(ui_page) == 1;"
@@ -1944,7 +1948,6 @@ font:
   # Main menu icons: settings, cast; the radio on the startup page (ti40 only).
   - {file: {type: web, url: '${tabler_font}'}, id: ti24, size: 24, bpp: 4, glyphs: ["", ""]}
   - {file: {type: web, url: '${tabler_font}'}, id: ti40, size: 40, bpp: 4, glyphs: ["", "", ""]}
-  - {file: {type: web, url: '${tabler_font}'}, id: ti22, size: 22, bpp: 4, glyphs: [""]}
   # Cover placeholder on the playing screen.
   - {file: {type: web, url: '${tabler_font}'}, id: ti34, size: 34, bpp: 4, glyphs: [""]}
 
@@ -2037,7 +2040,6 @@ lvgl:
         - label: {id: lbl_now_sub, text: "", x: 8, y: 80, width: 144, height: 20, long_mode: DOT, text_font: f16m, text_color: 0xE1E1E8}
         # Where the audio comes from: the AirPlay sender's device name or "Sendspin" (the component does not report the server name); empty for a station.
         - label: {id: lbl_now_source, text: "", x: 8, y: 3, width: 120, height: 15, long_mode: DOT, text_font: f12m, text_color: 0xC4C4CC, hidden: true}
-        - label: {id: pause_overlay, text: "", x: 132, y: 6, text_font: ti22, text_color: 0xFFFFFF, hidden: true}
         - obj:
             id: now_prog
             styles: plain
@@ -2049,10 +2051,22 @@ lvgl:
             hidden: true
             widgets:
               - label: {id: lbl_prog_rem, text: "", x: 108, y: 2, width: SIZE_CONTENT, text_font: f13m, text_color: 0xE1E1E8}
-              # Playing bars at the right end; animate_bars moves them while something plays.
+              # Playing bars at the right end; the 60 ms interval moves them while something plays.
               - obj: {id: ind0, styles: plain, x: 131, y: 13, width: 3, height: 3, bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
               - obj: {id: ind1, styles: plain, x: 136, y: 13, width: 3, height: 3, bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
               - obj: {id: ind2, styles: plain, x: 141, y: 13, width: 3, height: 3, bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
+              # Pause symbol in place of the playing bars, as tall as the highest bar.
+              - obj:
+                  id: pause_overlay
+                  styles: plain
+                  x: 131
+                  y: 4
+                  width: 13
+                  height: 12
+                  hidden: true
+                  widgets:
+                    - obj: {styles: plain, x: 2, y: 0, width: 3, height: 12, bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
+                    - obj: {styles: plain, x: 8, y: 0, width: 3, height: 12, bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
               - bar:
                   id: bar_prog
                   x: 0
@@ -2296,12 +2310,11 @@ lvgl:
       styles: page_style
       scrollable: false
       widgets:
-        - label: {id: lbl_ota_title, text: "Update", x: 0, y: 30, width: 160, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
-        - label: {id: lbl_ota_sub, text: "Firmware wird installiert", x: 0, y: 50, width: 160, text_align: CENTER, text_font: f11m, text_color: 0xC4C4CC}
+        - label: {id: lbl_ota_title, text: "Update", x: 0, y: 40, width: 160, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
         - bar:
             id: bar_ota
             x: 20
-            y: 72
+            y: 62
             width: 120
             height: 4
             min_value: 0
@@ -2313,5 +2326,4 @@ lvgl:
             indicator:
               bg_color: 0xFFFFFF
               radius: 2
-        - label: {id: lbl_ota_pct, text: "0 %", x: 0, y: 82, width: 160, text_align: CENTER, text_font: f12m, text_color: 0xFFFFFF}
-        - label: {id: lbl_ota_foot, text: "Nicht ausschalten", x: 0, y: 110, width: 160, text_align: CENTER, text_font: f10m, text_color: 0x787880}
+        - label: {id: lbl_ota_pct, text: "0 %", x: 0, y: 72, width: 160, text_align: CENTER, text_font: f12m, text_color: 0xFFFFFF}
