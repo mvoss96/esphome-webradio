@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.15.1"
+    version: "1.15.2"
   on_boot:
     priority: -100
     then:
@@ -302,6 +302,8 @@ globals:
     initial_value: 'false'
 
 wifi:
+  # Without power saving the radio answers in a few ms instead of 200-2000 ms; MA and the Home tile need that.
+  power_save_mode: none
   on_connect:
     - globals.set:
         id: wifi_connected

@@ -87,9 +87,10 @@ void RadioWeb::loop() {
 }
 
 #ifdef USE_RADIO_WEB_COVER
-static void put_le(RadioWeb::Buffer &out, uint32_t value, int bytes) {
+static uint8_t *put_le(uint8_t *out, uint32_t value, int bytes) {
   for (int i = 0; i < bytes; i++)
-    out.push_back((value >> (8 * i)) & 0xFF);
+    *out++ = (value >> (8 * i)) & 0xFF;
+  return out;
 }
 
 void RadioWeb::refresh_cover_() {
@@ -110,42 +111,49 @@ void RadioWeb::refresh_cover_() {
   }
   if (hash == this->cover_id_)
     return;
-  this->cover_id_ = hash;
 
   std::shared_ptr<Buffer> bmp;
   if (hash != 0) {
     // 24-bit BMP, rows top to bottom (negative height), each row padded to 4 bytes.
     const uint32_t row = (w * 3 + 3) & ~3u;
     const uint32_t pixels = row * h;
-    bmp = std::make_shared<Buffer>();
-    bmp->reserve(54 + pixels);
-    bmp->push_back('B');
-    bmp->push_back('M');
-    put_le(*bmp, 54 + pixels, 4);
-    put_le(*bmp, 0, 4);
-    put_le(*bmp, 54, 4);
-    put_le(*bmp, 40, 4);
-    put_le(*bmp, w, 4);
-    put_le(*bmp, static_cast<uint32_t>(-h), 4);
-    put_le(*bmp, 1, 2);
-    put_le(*bmp, 24, 2);
-    put_le(*bmp, 0, 4);
-    put_le(*bmp, pixels, 4);
-    put_le(*bmp, 2835, 4);
-    put_le(*bmp, 2835, 4);
-    put_le(*bmp, 0, 4);
-    put_le(*bmp, 0, 4);
+    const size_t size = 54 + pixels;
+    uint8_t *data = RAMAllocator<uint8_t>().allocate(size);
+    if (data == nullptr) {
+      // cover_id_ stays unchanged, so the next refresh tries again.
+      ESP_LOGW(TAG, "No memory for the cover (%u bytes), trying again", (unsigned) size);
+      return;
+    }
+    bmp = std::shared_ptr<Buffer>(new Buffer{data, size});
+    uint8_t *out = data;
+    *out++ = 'B';
+    *out++ = 'M';
+    out = put_le(out, size, 4);
+    out = put_le(out, 0, 4);
+    out = put_le(out, 54, 4);
+    out = put_le(out, 40, 4);
+    out = put_le(out, w, 4);
+    out = put_le(out, static_cast<uint32_t>(-h), 4);
+    out = put_le(out, 1, 2);
+    out = put_le(out, 24, 2);
+    out = put_le(out, 0, 4);
+    out = put_le(out, pixels, 4);
+    out = put_le(out, 2835, 4);
+    out = put_le(out, 2835, 4);
+    out = put_le(out, 0, 4);
+    out = put_le(out, 0, 4);
     for (int y = 0; y < h; y++) {
       for (int x = 0; x < w; x++) {
         const Color c = img->get_pixel(x, y);
-        bmp->push_back(c.b);
-        bmp->push_back(c.g);
-        bmp->push_back(c.r);
+        *out++ = c.b;
+        *out++ = c.g;
+        *out++ = c.r;
       }
       for (uint32_t pad = w * 3; pad < row; pad++)
-        bmp->push_back(0);
+        *out++ = 0;
     }
   }
+  this->cover_id_ = hash;
   std::lock_guard<std::mutex> guard(this->lock_);
   this->cover_ = std::move(bmp);
 }
@@ -195,7 +203,7 @@ void RadioWeb::handleRequest(AsyncWebServerRequest *request) {
         request->send(404, "text/plain", "Kein Cover");
         return;
       }
-      auto *response = request->beginResponse(200, "image/bmp", bmp->data(), bmp->size());
+      auto *response = request->beginResponse(200, "image/bmp", bmp->data, bmp->size);
       // The page asks with ?v=<cover id>, so one URL always means the same picture.
       response->addHeader("Cache-Control", "max-age=86400");
       request->send(response);

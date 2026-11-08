@@ -35,8 +35,12 @@ namespace esphome::radio_web {
 /// lambdas and triggers run in loop(), on the main task.
 class RadioWeb : public Component, public AsyncWebHandler {
  public:
-  /// Byte buffer that prefers PSRAM over internal RAM.
-  using Buffer = std::vector<uint8_t, RAMAllocator<uint8_t>>;
+  /// Byte buffer from RAMAllocator (PSRAM preferred), freed with the last reference.
+  struct Buffer {
+    uint8_t *data;
+    size_t size;
+    ~Buffer() { RAMAllocator<uint8_t>().deallocate(this->data, this->size); }
+  };
 
   explicit RadioWeb(web_server_base::WebServerBase *base) : base_(base) {}
 
