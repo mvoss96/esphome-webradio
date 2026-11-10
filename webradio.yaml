@@ -11,7 +11,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.17.0"
+    version: "1.18.0"
   on_boot:
     priority: -100
     then:
@@ -669,18 +669,7 @@ media_player:
             lambda: "return id(media_player_sendspin).is_muted() && id(media_player_sendspin).volume > 0.001f;"
           then:
             - media_player.unmute: media_player_sendspin
-      - script.execute: refresh_volume
-      - lvgl.widget.hide: clock_date
-      - lvgl.widget.show: clock_vol
-      - script.execute:
-          id: swap_rows
-          to_volume: true
-      - if:
-          condition:
-            lambda: "return id(ui_page) == 0;"
-          then:
-            - script.execute: display_wake
-      - script.execute: vol_idle
+      - script.execute: show_volume
 
 sensor:
   # Position and length of the Sendspin track in ms, for the progress row.
@@ -1009,6 +998,7 @@ script:
                       media_url: !lambda "return id(station_urls)[idx];"
                   - lambda: "id(current_station).publish_state(id(station_names)[idx]);"
                   - script.execute: show_playing
+                  - script.execute: show_volume
                 else:
                   - logger.log:
                       level: WARN
@@ -1044,6 +1034,7 @@ script:
                   lambda: "return id(ui_page) <= 1;"
                 then:
                   - script.execute: show_playing
+                  - script.execute: show_volume
             - if:
                 condition:
                   lambda: "return id(ui_page) == 2 && id(menu) == 0;"
@@ -1200,9 +1191,18 @@ script:
           else
             snprintf(buf, sizeof(buf), "-%d:%02d", rem / 60, rem % 60);
           lv_label_set_text(id(lbl_prog_rem), buf);
-          // The label is as wide as its text and sits left of the playing bars; the bar takes the rest.
-          lv_obj_update_layout(id(lbl_prog_rem));
-          const int w = lv_obj_get_width(id(lbl_prog_rem));
+          // The label sits left of the playing bars and the bar takes the rest. Its width fits the
+          // longest text of this track ("-88:88" or "-8:88:88" in the widest digit), so neither moves
+          // while the digits change; the font's digits differ in width.
+          const lv_font_t *font = id(f13m)->get_lv_font();
+          static int digit_w = 0;
+          if (digit_w == 0)
+            for (char c = '0'; c <= '9'; c++)
+              digit_w = std::max(digit_w, (int) lv_font_get_glyph_width(font, c, 0));
+          const bool hours = dur >= 3600000;
+          const int w = lv_font_get_glyph_width(font, '-', 0) + (hours ? 2 : 1) * lv_font_get_glyph_width(font, ':', 0) +
+                        (hours ? 5 : 4) * digit_w;
+          lv_obj_set_width(id(lbl_prog_rem), w);
           lv_obj_set_x(id(lbl_prog_rem), BARS_X - 6 - w);
           lv_obj_set_width(id(bar_prog), BARS_X - 6 - w - 8);
 
@@ -1779,6 +1779,22 @@ script:
           for (lv_obj_t *bar : {id(bar_vol), id(bar_clock_vol)})
             lv_bar_set_value(bar, pct, LV_ANIM_OFF);
 
+  # Show the volume row for two seconds: on a volume change and when the source changes.
+  - id: show_volume
+    then:
+      - script.execute: refresh_volume
+      - lvgl.widget.hide: clock_date
+      - lvgl.widget.show: clock_vol
+      - script.execute:
+          id: swap_rows
+          to_volume: true
+      - if:
+          condition:
+            lambda: "return id(ui_page) == 0;"
+          then:
+            - script.execute: display_wake
+      - script.execute: vol_idle
+
   # Two seconds after the last change: date / progress row back instead of the volume row.
   - id: vol_idle
     mode: restart
@@ -2052,7 +2068,7 @@ lvgl:
             scrollable: false
             hidden: true
             widgets:
-              - label: {id: lbl_prog_rem, text: "", x: 108, y: 2, width: SIZE_CONTENT, text_font: f13m, text_color: 0xE1E1E8}
+              - label: {id: lbl_prog_rem, text: "", x: 88, y: 2, width: 37, text_align: RIGHT, text_font: f13m, text_color: 0xE1E1E8}
               # Playing bars at the right end; the 60 ms interval moves them while something plays.
               - obj: {id: ind0, styles: plain, x: 131, y: 13, width: 3, height: 3, bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
               - obj: {id: ind1, styles: plain, x: 136, y: 13, width: 3, height: 3, bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
