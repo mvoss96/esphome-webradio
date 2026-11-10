@@ -22,6 +22,33 @@ The display is used in landscape (LVGL rotation 270°). The ST7735 controller ha
 memory; `offset_*` and `pad_*` in `webradio.yaml` describe that window. With wrong pads a strip of
 noise shows at one edge.
 
+### Other displays
+
+The layout is drawn for 160×128 and scaled to the display size in the substitutions
+`screen_width` and `screen_height`: positions and widths by `sx` (width / 160), heights by `sy`
+(height / 128), fonts, radii and square parts such as the carousel tiles by the smaller of the two.
+`corner_inset` moves the top and bottom rows away from the sides on panels with rounded corners.
+Displays with about the same aspect ratio as 160×128 (1.25) look like the original; a square or
+portrait display would need its own layout.
+
+A package in [`displays/`](displays) sets these substitutions and replaces the display:
+
+| File | Display |
+|------|---------|
+| [`displays/jd9853-296x240.yaml`](displays/jd9853-296x240.yaml) | JD9853 2.01" IPS 240×296 in landscape, wired like the ST7735 |
+
+Add it after `webradio.yaml`:
+
+```yaml
+packages:
+  webradio:
+    url: https://github.com/mvoss96/esphome-webradio
+    files: [webradio.yaml, displays/jd9853-296x240.yaml]
+```
+
+Station logos are stored at the size the display shows them (74 px on 160×128, 137 px on
+296×240). After a display change they are loaded again.
+
 ## Use
 
 Add the package to a device file, as in [`example/web-radio.yaml`](example/web-radio.yaml):

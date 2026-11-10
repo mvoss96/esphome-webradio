@@ -317,12 +317,12 @@ static uint32_t job_key(const std::string &name, const std::string &stream_url, 
 
 // ---------------- storage ----------------
 
-// One flash record per logo: header, then STORE x STORE RGB565 pixels. Three 4 KB
-// sectors, so a record can be erased on its own.
-static constexpr uint32_t RECORD_SIZE = 0x3000;
+// One flash record per logo: header, then STORE x STORE RGB565 pixels, in whole 4 KB
+// sectors so a record can be erased on its own (three sectors for 74 x 74).
 static constexpr uint32_t RECORD_MAGIC = 0x4F474F4C;  // "LOGO"
 static constexpr uint32_t PIXEL_OFFSET = 16;
 static constexpr size_t PIXEL_BYTES = STORE * STORE * 2;
+static constexpr uint32_t RECORD_SIZE = (PIXEL_OFFSET + PIXEL_BYTES + 0xFFF) & ~0xFFFu;
 static constexpr int MEM_RECORDS = 48;  // PSRAM fallback without the partition
 
 struct RecordHeader {
@@ -569,10 +569,11 @@ std::vector<std::string> StationLogos::candidates_(const Job &job) {
   return urls;
 }
 
-/// Download logo_url through wsrv.nl as a 74x74 PNG and decode it to RGB565 into out.
+/// Download logo_url through wsrv.nl as a STORE x STORE PNG and decode it to RGB565 into out.
 bool StationLogos::fetch_(const std::string &logo_url, uint16_t *out) {
   const std::string url = "http://wsrv.nl/?url=" + url_encode(logo_url) +
-                          "&w=74&h=74&fit=contain&cbg=white&bg=white&output=png";
+                          "&w=" + std::to_string(STORE) + "&h=" + std::to_string(STORE) +
+                          "&fit=contain&cbg=white&bg=white&output=png";
   const size_t png_len = http_get(url, MAX_PNG);
   if (png_len == 0)
     return false;

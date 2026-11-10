@@ -16,7 +16,7 @@ static lv_color_t col(uint32_t hex) { return lv_color_hex(hex); }
 // Accent border inside a logo box, drawn after the logo image (border_post). It stays within
 // the box, which LVGL redraws as a whole; an outline outside the box was redrawn only in parts.
 static void mark_playing(const Slot &s, bool playing) {
-  lv_obj_set_style_border_width(s.logo_box, playing ? 2 : 0, 0);
+  lv_obj_set_style_border_width(s.logo_box, playing ? scale_f(2) : 0, 0);
   lv_obj_set_style_border_color(s.logo_box, col(ACCENT), 0);
   lv_obj_set_style_border_opa(s.logo_box, LV_OPA_COVER, 0);
   lv_obj_set_style_border_post(s.logo_box, true, 0);
@@ -63,7 +63,7 @@ const lv_font_t *fit_lines(const char *text, const lv_font_t *const *fonts, int 
 const lv_image_dsc_t *make_backdrop(const lv_image_dsc_t *src) {
   // Blur at half resolution, then scale up bilinearly. Only the output stays allocated;
   // PSRAM is tight while audio plays.
-  static constexpr int OW = 160, OH = 128, W = OW / 2, H = OH / 2, BLUR = 2;
+  static constexpr int OW = SCREEN_W, OH = SCREEN_H, W = OW / 2, H = OH / 2, BLUR = 2;
   static constexpr float DARK = 0.33f;
   static uint16_t *out = nullptr;
   static lv_image_dsc_t dsc;
@@ -204,7 +204,7 @@ static const lv_image_dsc_t *cover_tile(const lv_image_dsc_t *src, int slot, int
   const int stride = src->header.stride ? src->header.stride : sw * 2;
   const int side = std::min(sw, sh);  // square centre crop of the source
   const int x0 = (sw - side) / 2, y0 = (sh - side) / 2;
-  const int radius = std::max(7, size * 12 / 56);
+  const int radius = std::max(scale_f(7), size * 12 / 56);
   const float k = dim ? 0.6f : 1.0f;
   for (int y = 0; y < size; y++) {
     for (int x = 0; x < size; x++) {
@@ -303,7 +303,7 @@ static void render_slot(const Slot &s, int slot, const Item *it, bool center,
           show(s.logo_lbl);
           lv_label_set_text(s.logo_lbl, it->letter);
           lv_obj_set_style_text_color(s.logo_lbl, col(center ? TEXT : DIM), 0);
-          lv_obj_align(s.logo_lbl, LV_ALIGN_CENTER, center ? 6 : 3, 0);
+          lv_obj_align(s.logo_lbl, LV_ALIGN_CENTER, center ? scale_x(6) : scale_x(3), 0);
         }
       }
       lv_obj_set_style_text_color(s.icon, col(center ? TEXT : DIM), 0);
@@ -328,7 +328,7 @@ void render(const Carousel &c, const std::vector<Item> &items, int sel,
   render_slot(c.right, 2, sel + 1 < n ? &items[sel + 1] : nullptr, false, logos, names);
 
   lv_label_set_text(c.name, cur.label.c_str());
-  lv_obj_set_style_text_font(c.name, fit_font(cur.label.c_str(), c.name_fonts, 3, 148), 0);
+  lv_obj_set_style_text_font(c.name, fit_font(cur.label.c_str(), c.name_fonts, 3, scale_x(148)), 0);
   if (cur.sub.empty()) {
     hide(c.sub);
   } else {
@@ -340,11 +340,11 @@ void render(const Carousel &c, const std::vector<Item> &items, int sel,
 
 void settle_in(lv_obj_t *body) {
   lv_anim_delete(body, nullptr);
-  lv_obj_set_y(body, 10);
+  lv_obj_set_y(body, scale_y(10));
   lv_anim_t a;
   lv_anim_init(&a);
   lv_anim_set_var(&a, body);
-  lv_anim_set_values(&a, 10, 0);
+  lv_anim_set_values(&a, scale_y(10), 0);
   lv_anim_set_duration(&a, 220);
   lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
   lv_anim_set_exec_cb(&a, [](void *o, int32_t v) { lv_obj_set_y((lv_obj_t *) o, v); });

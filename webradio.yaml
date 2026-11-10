@@ -1,4 +1,4 @@
-# ESPHome web radio: ESP32-S3, MAX98357A, ST7735 160x128, rotary encoder.
+# ESPHome web radio: ESP32-S3, MAX98357A, ST7735 160x128 (or another display, see displays/), rotary encoder.
 # Use as a package next to the device's name and Wi-Fi/API settings, see example/web-radio.yaml.
 
 substitutions:
@@ -7,11 +7,28 @@ substitutions:
   highpass_frequency: 90Hz
   # Tabler icon font, pinned so the icon code points cannot change.
   tabler_font: https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.50.0/dist/fonts/tabler-icons.ttf
+  # Display size in pixels as the UI sees it, after rotation. The layout is drawn for 160x128;
+  # positions and widths are scaled by sx, heights by sy, fonts, radii and square parts by sf.
+  # Another display: see displays/ for a package that sets these and the display itself.
+  screen_width: 160
+  screen_height: 128
+  # Extra distance from the sides for the top and bottom rows, for panels with rounded corners.
+  corner_inset: 0
+  sx: ${screen_width / 160}
+  sy: ${screen_height / 128}
+  sf: ${[screen_width / 160, screen_height / 128] | min}
+  # Sizes shared with the C++ components: carousel tiles and the stored logo and cover size.
+  tile_center: ${(68*sf)|round|int}
+  tile_side: ${(40*sf)|round|int}
+  logo_size: ${(74*sf)|round|int}
+  # Bottom row of the playing screen: its width and where the playing bars start in it.
+  row_width: ${(144*sx)|round|int - 2*corner_inset}
+  bars_x: ${(144*sx)|round|int - 2*corner_inset - (13*sx)|round|int}
 
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.18.0"
+    version: "1.19.0"
   on_boot:
     priority: -100
     then:
@@ -20,7 +37,7 @@ esphome:
           lv_anim_t a;
           lv_anim_init(&a);
           lv_anim_set_var(&a, id(boot_seg));
-          lv_anim_set_values(&a, 50, 94);
+          lv_anim_set_values(&a, ${(50*sx)|round|int}, ${(50*sx)|round|int + (60*sx)|round|int - (16*sx)|round|int});
           lv_anim_set_duration(&a, 700);
           lv_anim_set_playback_duration(&a, 700);
           lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
@@ -70,9 +87,14 @@ audio:
 # Station logos from radio-browser.info, resized by wsrv.nl, kept in PSRAM.
 station_logos:
   id: logos
+  size: ${logo_size}
 
-# Carousel rendering (C++ helpers, no options).
+# Carousel rendering (C++ helpers); screen and tile sizes from the substitutions.
 radio_ui:
+  screen_width: ${screen_width}
+  screen_height: ${screen_height}
+  tile_center: ${tile_center}
+  tile_side: ${tile_side}
 
 # Web page at http://<radio>/: control playback, and edit the station list under #sender.
 radio_web:
@@ -396,8 +418,8 @@ interval:
           const float t = millis() / 1000.0f;
           lv_obj_t *bars[3] = {id(ind0), id(ind1), id(ind2)};
           for (int i = 0; i < 3; i++) {
-            const int h = on ? 3 + (int) (9 * std::fabs(std::sin(t * SPEED[i] + i))) : 3;
-            lv_obj_set_y(bars[i], 16 - h);
+            const int h = on ? ${(3*sf)|round|int} + (int) (${(9*sy)|round|int} * std::fabs(std::sin(t * SPEED[i] + i))) : ${(3*sf)|round|int};
+            lv_obj_set_y(bars[i], ${(16*sy)|round|int} - h);
             lv_obj_set_height(bars[i], h);
           }
 
@@ -1119,7 +1141,7 @@ script:
           if (id(backdrop_dirty)) {
             id(backdrop_dirty) = false;
             const lv_image_dsc_t *art = nullptr;
-            if (id(radio_active)) art = id(logos)->get(3, id(station_index), 64, false);
+            if (id(radio_active)) art = id(logos)->get(3, id(station_index), ${(64*sf)|round|int}, false);
             else if (id(airplay_active)) art = id(airplay_has_cover) ? id(airplay_cover)->get_lv_image_dsc() : nullptr;
             else art = id(sendspin_has_cover) ? id(sendspin_cover_art)->get_lv_image_dsc() : nullptr;
             const lv_image_dsc_t *bd = make_backdrop(art);
@@ -1140,23 +1162,23 @@ script:
           else lv_obj_add_flag(id(now_prog), LV_OBJ_FLAG_HIDDEN);
 
           // Title: the largest font in which it wraps into two lines; artist below in 16 px.
-          const lv_font_t *font = fit_lines(name.c_str(), fonts, 3, 144, 2);
+          const lv_font_t *font = fit_lines(name.c_str(), fonts, 3, ${(144*sx)|round|int}, 2);
           const int lh = lv_font_get_line_height(font);
           lv_point_t size;
-          lv_text_get_size(&size, name.c_str(), font, 0, 0, 144, LV_TEXT_FLAG_NONE);
+          lv_text_get_size(&size, name.c_str(), font, 0, 0, ${(144*sx)|round|int}, LV_TEXT_FLAG_NONE);
           const int title_h = std::min<int>(size.y, 2 * lh);
           lv_label_set_text(id(lbl_now_name), name.c_str());
           lv_obj_set_style_text_font(id(lbl_now_name), font, 0);
           lv_obj_set_height(id(lbl_now_name), title_h);
-          const int sub_h = sub.empty() ? 0 : 22;
+          const int sub_h = sub.empty() ? 0 : ${(22*sy)|round|int};
           // Below the source line when it is shown.
-          const int top = std::max((108 - title_h - sub_h) / 2, source.empty() ? 0 : 16);
+          const int top = std::max((${(108*sy)|round|int} - title_h - sub_h) / 2, source.empty() ? 0 : ${(16*sy)|round|int});
           lv_label_set_text(id(lbl_now_source), source.c_str());
           if (source.empty()) lv_obj_add_flag(id(lbl_now_source), LV_OBJ_FLAG_HIDDEN);
           else lv_obj_remove_flag(id(lbl_now_source), LV_OBJ_FLAG_HIDDEN);
           lv_obj_set_y(id(lbl_now_name), top);
           lv_label_set_text(id(lbl_now_sub), sub.c_str());
-          lv_obj_set_y(id(lbl_now_sub), top + title_h + 2);
+          lv_obj_set_y(id(lbl_now_sub), top + title_h + ${(2*sy)|round|int});
           if (sub.empty()) lv_obj_add_flag(id(lbl_now_sub), LV_OBJ_FLAG_HIDDEN);
           else lv_obj_remove_flag(id(lbl_now_sub), LV_OBJ_FLAG_HIDDEN);
       - script.execute: update_progress
@@ -1167,7 +1189,7 @@ script:
     then:
       - lambda: |-
           if (!id(progress_shown)) return;
-          static constexpr int BARS_X = 131;  // the playing bars take the row from here on
+          static constexpr int BARS_X = ${bars_x};  // the playing bars take the row from here on
           if (id(progress_live)) {
             lv_obj_add_flag(id(lbl_prog_rem), LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(id(bar_prog), LV_OBJ_FLAG_HIDDEN);
@@ -1203,8 +1225,8 @@ script:
           const int w = lv_font_get_glyph_width(font, '-', 0) + (hours ? 2 : 1) * lv_font_get_glyph_width(font, ':', 0) +
                         (hours ? 5 : 4) * digit_w;
           lv_obj_set_width(id(lbl_prog_rem), w);
-          lv_obj_set_x(id(lbl_prog_rem), BARS_X - 6 - w);
-          lv_obj_set_width(id(bar_prog), BARS_X - 6 - w - 8);
+          lv_obj_set_x(id(lbl_prog_rem), BARS_X - ${(6*sx)|round|int} - w);
+          lv_obj_set_width(id(bar_prog), BARS_X - ${(6*sx)|round|int} - w - ${(8*sx)|round|int});
 
   # Back to the playing screen when something plays, else to the clock.
   - id: go_home
@@ -1286,9 +1308,9 @@ script:
             return;
           }
           auto step = [](void *, int32_t g) {
-            lv_obj_set_x(id(l_root), -12 * (256 - g) / 256);
-            lv_obj_set_x(id(r_root), 120 + 12 * (256 - g) / 256);
-            lv_obj_set_y(id(c_root), 20 + 10 * (256 - g) / 256);
+            lv_obj_set_x(id(l_root), -${(12*sx)|round|int} * (256 - g) / 256);
+            lv_obj_set_x(id(r_root), ${screen_width - tile_side} + ${(12*sx)|round|int} * (256 - g) / 256);
+            lv_obj_set_y(id(c_root), ${(20*sy)|round|int} + ${(10*sy)|round|int} * (256 - g) / 256);
             const lv_opa_t t = std::min<int32_t>(255, g);
             lv_obj_set_style_text_opa(id(c_name), t, 0);
             lv_obj_set_style_text_opa(id(c_sub), t, 0);
@@ -1372,7 +1394,7 @@ script:
     then:
       - lambda: |-
           using namespace esphome::radio_ui;
-          const int32_t y = 24 + id(menu_sel) * 24;
+          const int32_t y = ${(24*sy)|round|int} + id(menu_sel) * ${(24*sy)|round|int};
           lv_obj_set_y(id(set_pill), y);
           lv_obj_set_y(id(set_ink), -y);
           lv_obj_set_style_bg_color(id(set_pill), lv_color_hex(id(menu_edit) ? ACCENT : TEXT), 0);
@@ -1513,24 +1535,24 @@ script:
           lv_obj_t *fills[3] = {id(eq_fill0), id(eq_fill1), id(eq_fill2)};
           lv_obj_t *knobs[3] = {id(eq_knob0), id(eq_knob1), id(eq_knob2)};
           lv_obj_t *labels[3] = {id(eq_lbl0), id(eq_lbl1), id(eq_lbl2)};
-          const int top = 24, bottom = 84;  // slider track, see eq_page
+          const int top = ${(24*sy)|round|int}, bottom = ${(24*sy)|round|int + (61*sy)|round|int - 1};  // slider track, see eq_page
           const int sel = id(eq_sel);
           for (int k = 0; k < 3; k++) {
             auto ypos = [&](float v) {
               const float f = (std::min(std::max(v, LO[k]), HI[k]) - LO[k]) / (HI[k] - LO[k]);
               return bottom - (int) lroundf(f * (bottom - top));
             };
-            const int cx = 32 + 48 * k, y = ypos(nums[k]->state), zero = ypos(0);
+            const int cx = ${(31*sx)|round|int + (3*sx)|round|int // 2} + ${(48*sx)|round|int} * k, y = ypos(nums[k]->state), zero = ypos(0);
             const lv_color_t c = lv_color_hex(k == sel ? (id(eq_edit) ? ACCENT : TEXT) : DIM);
-            lv_obj_set_pos(fills[k], cx - 1, std::min(y, zero));
-            lv_obj_set_size(fills[k], 3, std::max(1, std::abs(y - zero)));
+            lv_obj_set_pos(fills[k], cx - ${(3*sx)|round|int // 2}, std::min(y, zero));
+            lv_obj_set_size(fills[k], ${(3*sx)|round|int}, std::max(1, std::abs(y - zero)));
             lv_obj_set_style_bg_color(fills[k], c, 0);
-            lv_obj_set_pos(knobs[k], cx - 4, y - 4);
+            lv_obj_set_pos(knobs[k], cx - ${(9*sf)|round|int // 2}, y - ${(9*sf)|round|int // 2});
             lv_obj_set_style_bg_color(knobs[k], c, 0);
             lv_obj_set_style_text_color(labels[k], lv_color_hex(k == sel ? BG : DIM), 0);
           }
           // The selected band's name sits on the pill (amber while editing); the line below shows its value.
-          lv_obj_set_x(id(eq_pill), 32 + 48 * sel - 22);
+          lv_obj_set_x(id(eq_pill), ${(31*sx)|round|int + (3*sx)|round|int // 2} + ${(48*sx)|round|int} * sel - ${(44*sx)|round|int // 2});
           lv_obj_set_style_bg_color(id(eq_pill), lv_color_hex(id(eq_edit) ? ACCENT : TEXT), 0);
           const std::string text = gain_text(nums[sel]->state) + " dB";
           lv_label_set_text(id(eq_value), text.c_str());
@@ -1826,9 +1848,9 @@ script:
           lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
           lv_anim_set_exec_cb(&a, [](void *, int32_t v) {
             id(vol_row_pos) = v;
-            lv_obj_set_y(id(now_vol), 106 + 22 * (255 - v) / 255);
+            lv_obj_set_y(id(now_vol), ${(106*sy)|round|int} + ${(22*sy)|round|int} * (255 - v) / 255);
             lv_obj_set_style_opa(id(now_vol), v, 0);
-            lv_obj_set_y(id(now_prog), 106 + 22 * v / 255);
+            lv_obj_set_y(id(now_prog), ${(106*sy)|round|int} + ${(22*sy)|round|int} * v / 255);
             lv_obj_set_style_opa(id(now_prog), 255 - v, 0);
           });
           lv_anim_set_completed_cb(&a, [](lv_anim_t *) {
@@ -1865,8 +1887,10 @@ script:
           then:
             - script.execute: show_idle
 
+# ST7735 160x128. Another display: a package from displays/ removes this one by its id.
 display:
   - platform: mipi_spi
+    id: tft_display
     model: ST7735
     data_rate: 40Mhz
     dimensions:
@@ -1887,7 +1911,7 @@ image:
     id: sendspin_cover_slot
     format: JPEG
     type: RGB565
-    resize: 74x74
+    resize: ${logo_size}x${logo_size}
     source: ALBUM
     current_image:
       id: sendspin_cover_art
@@ -1922,7 +1946,7 @@ image:
   - platform: airplay
     id: airplay_cover
     type: RGB565
-    resize: 74x74
+    resize: ${logo_size}x${logo_size}
     on_image_update:
       - lambda: |-
           id(airplay_has_cover) = true;
@@ -1949,25 +1973,25 @@ image:
 # Montserrat with Latin glyphs (umlauts). Medium weight, because thin strokes
 # vanish on the TN panel at an angle.
 font:
-  - {file: "gfonts://Montserrat@500", id: f10m, size: 10, bpp: 4, glyphsets: [GF_Latin_Core]}
-  - {file: "gfonts://Montserrat@500", id: f11m, size: 11, bpp: 4, glyphsets: [GF_Latin_Core]}
-  - {file: "gfonts://Montserrat@500", id: f12m, size: 12, bpp: 4, glyphsets: [GF_Latin_Core]}
-  - {file: "gfonts://Montserrat@500", id: f13m, size: 13, bpp: 4, glyphsets: [GF_Latin_Core]}
-  - {file: "gfonts://Montserrat@500", id: f16m, size: 16, bpp: 4, glyphsets: [GF_Latin_Core]}
-  - {file: "gfonts://Montserrat@500", id: f20m, size: 20, bpp: 4, glyphs: "0123456789"}
-  - {file: "gfonts://Montserrat@500", id: f20t, size: 20, bpp: 4, glyphsets: [GF_Latin_Core]}
+  - {file: "gfonts://Montserrat@500", id: f10m, size: "${(10*sf)|round|int}", bpp: 4, glyphsets: [GF_Latin_Core]}
+  - {file: "gfonts://Montserrat@500", id: f11m, size: "${(11*sf)|round|int}", bpp: 4, glyphsets: [GF_Latin_Core]}
+  - {file: "gfonts://Montserrat@500", id: f12m, size: "${(12*sf)|round|int}", bpp: 4, glyphsets: [GF_Latin_Core]}
+  - {file: "gfonts://Montserrat@500", id: f13m, size: "${(13*sf)|round|int}", bpp: 4, glyphsets: [GF_Latin_Core]}
+  - {file: "gfonts://Montserrat@500", id: f16m, size: "${(16*sf)|round|int}", bpp: 4, glyphsets: [GF_Latin_Core]}
+  - {file: "gfonts://Montserrat@500", id: f20m, size: "${(20*sf)|round|int}", bpp: 4, glyphs: "0123456789"}
+  - {file: "gfonts://Montserrat@500", id: f20t, size: "${(20*sf)|round|int}", bpp: 4, glyphsets: [GF_Latin_Core]}
   # Mute symbol (Material Design Icons "volume-mute").
-  - {file: {type: web, url: "https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/fonts/materialdesignicons-webfont.ttf"}, id: mdi18, size: 18, bpp: 4, glyphs: ["󰝟", "󰕾"]}
-  - {file: "gfonts://Montserrat@500", id: f24t, size: 24, bpp: 4, glyphsets: [GF_Latin_Core]}
-  - {file: "gfonts://Montserrat", id: f44r, size: 44, bpp: 4, glyphs: "0123456789:-"}
+  - {file: {type: web, url: "https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/fonts/materialdesignicons-webfont.ttf"}, id: mdi18, size: "${(18*sf)|round|int}", bpp: 4, glyphs: ["󰝟", "󰕾"]}
+  - {file: "gfonts://Montserrat@500", id: f24t, size: "${(24*sf)|round|int}", bpp: 4, glyphsets: [GF_Latin_Core]}
+  - {file: "gfonts://Montserrat", id: f44r, size: "${(44*sf)|round|int}", bpp: 4, glyphs: "0123456789:-"}
 
   # Tabler line icons of the settings list: back, equalizer, dim, info, chevron.
-  - {file: {type: web, url: '${tabler_font}'}, id: ti16, size: 16, bpp: 4, glyphs: ["", "", "", "", ""]}
+  - {file: {type: web, url: '${tabler_font}'}, id: ti16, size: "${(16*sf)|round|int}", bpp: 4, glyphs: ["", "", "", "", ""]}
   # Main menu icons: settings, cast; the radio on the startup page (ti40 only).
-  - {file: {type: web, url: '${tabler_font}'}, id: ti24, size: 24, bpp: 4, glyphs: ["", ""]}
-  - {file: {type: web, url: '${tabler_font}'}, id: ti40, size: 40, bpp: 4, glyphs: ["", "", ""]}
+  - {file: {type: web, url: '${tabler_font}'}, id: ti24, size: "${(24*sf)|round|int}", bpp: 4, glyphs: ["", ""]}
+  - {file: {type: web, url: '${tabler_font}'}, id: ti40, size: "${(40*sf)|round|int}", bpp: 4, glyphs: ["", "", ""]}
   # Cover placeholder on the playing screen.
-  - {file: {type: web, url: '${tabler_font}'}, id: ti34, size: 34, bpp: 4, glyphs: [""]}
+  - {file: {type: web, url: '${tabler_font}'}, id: ti34, size: "${(34*sf)|round|int}", bpp: 4, glyphs: [""]}
 
 ########################################################################
 # Colours (see radio_ui.h): background 0x060608, text 0xFFFFFF, secondary
@@ -1998,53 +2022,53 @@ lvgl:
       styles: page_style
       scrollable: false
       widgets:
-        - label: {text: "", x: 0, y: 20, width: 160, text_align: CENTER, text_font: ti40, text_color: 0xFFFFFF}
-        - label: {text: "Web Radio", x: 0, y: 68, width: 160, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
-        - label: {id: lbl_boot_status, text: "Verbinde mit WLAN …", x: 0, y: 88, width: 160, text_align: CENTER, text_font: f11m, text_color: 0xC4C4CC}
-        - obj: {x: 50, y: 110, width: 60, height: 3, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
-        - obj: {id: boot_seg, x: 50, y: 110, width: 16, height: 3, radius: 1, bg_color: 0xFFFFFF, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - label: {text: "", x: 0, y: "${(20*sy)|round|int}", width: "${(160*sx)|round|int}", text_align: CENTER, text_font: ti40, text_color: 0xFFFFFF}
+        - label: {text: "Web Radio", x: 0, y: "${(68*sy)|round|int}", width: "${(160*sx)|round|int}", text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
+        - label: {id: lbl_boot_status, text: "Verbinde mit WLAN …", x: 0, y: "${(88*sy)|round|int}", width: "${(160*sx)|round|int}", text_align: CENTER, text_font: f11m, text_color: 0xC4C4CC}
+        - obj: {x: "${(50*sx)|round|int}", y: "${(110*sy)|round|int}", width: "${(60*sx)|round|int}", height: "${(3*sy)|round|int}", radius: "${(1*sf)|round|int}", bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+        - obj: {id: boot_seg, x: "${(50*sx)|round|int}", y: "${(110*sy)|round|int}", width: "${(16*sx)|round|int}", height: "${(3*sy)|round|int}", radius: "${(1*sf)|round|int}", bg_color: 0xFFFFFF, bg_opa: COVER, border_width: 0, pad_all: 0}
 
     # 0: Clock. Turning shows the volume row instead of weekday and date.
     - id: idle_page
       styles: page_style
       scrollable: false
       widgets:
-        - label: {id: lbl_idle_time, text: "--:--", x: 0, y: 17, width: 160, text_align: CENTER, text_font: f44r, text_color: 0xFFFFFF}
+        - label: {id: lbl_idle_time, text: "--:--", x: 0, y: "${(17*sy)|round|int}", width: "${(160*sx)|round|int}", text_align: CENTER, text_font: f44r, text_color: 0xFFFFFF}
         - obj:
             id: clock_date
             styles: plain
             x: 0
-            y: 70
-            width: 160
-            height: 42
+            y: "${(70*sy)|round|int}"
+            width: "${(160*sx)|round|int}"
+            height: "${(42*sy)|round|int}"
             widgets:
-              - label: {id: lbl_idle_day, text: "", x: 0, y: 0, width: 160, text_align: CENTER, text_font: f16m, text_color: 0xC4C4CC}
-              - label: {id: lbl_idle_date, text: "", x: 0, y: 21, width: 160, text_align: CENTER, text_font: f16m, text_color: 0xC4C4CC}
+              - label: {id: lbl_idle_day, text: "", x: 0, y: 0, width: "${(160*sx)|round|int}", text_align: CENTER, text_font: f16m, text_color: 0xC4C4CC}
+              - label: {id: lbl_idle_date, text: "", x: 0, y: "${(21*sy)|round|int}", width: "${(160*sx)|round|int}", text_align: CENTER, text_font: f16m, text_color: 0xC4C4CC}
         - obj:
             id: clock_vol
             styles: plain
             x: 0
-            y: 78
-            width: 160
-            height: 34
+            y: "${(78*sy)|round|int}"
+            width: "${(160*sx)|round|int}"
+            height: "${(34*sy)|round|int}"
             hidden: true
             widgets:
-              - label: {id: lbl_clock_vol, text: "", x: 0, y: 0, width: 160, text_align: CENTER, text_font: f20m, text_color: 0xFFFFFF}
+              - label: {id: lbl_clock_vol, text: "", x: 0, y: 0, width: "${(160*sx)|round|int}", text_align: CENTER, text_font: f20m, text_color: 0xFFFFFF}
               - bar:
                   id: bar_clock_vol
-                  x: 20
-                  y: 28
-                  width: 120
-                  height: 6
+                  x: "${(20*sx)|round|int}"
+                  y: "${(28*sy)|round|int}"
+                  width: "${(120*sx)|round|int}"
+                  height: "${(6*sy)|round|int}"
                   min_value: 0
                   max_value: 100
                   value: 50
-                  radius: 3
+                  radius: "${(3*sf)|round|int}"
                   bg_color: 0x46464E
                   bg_opa: COVER
                   indicator:
                     bg_color: 0xFFB020
-                    radius: 3
+                    radius: "${(3*sf)|round|int}"
 
     # 1: Playing. The cover (or the station logo) as darkened background, title and artist (or
     # "Webradio"), and a row with progress, remaining time and the playing bars.
@@ -2054,43 +2078,43 @@ lvgl:
       scrollable: false
       widgets:
         - image: {id: now_bg, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
-        - label: {id: lbl_now_name, text: "", x: 8, y: 20, width: 144, height: 58, long_mode: DOT, text_font: f24t, text_color: 0xFFFFFF}
-        - label: {id: lbl_now_sub, text: "", x: 8, y: 80, width: 144, height: 20, long_mode: DOT, text_font: f16m, text_color: 0xE1E1E8}
+        - label: {id: lbl_now_name, text: "", x: "${(8*sx)|round|int}", y: "${(20*sy)|round|int}", width: "${(144*sx)|round|int}", height: "${(58*sy)|round|int}", long_mode: DOT, text_font: f24t, text_color: 0xFFFFFF}
+        - label: {id: lbl_now_sub, text: "", x: "${(8*sx)|round|int}", y: "${(80*sy)|round|int}", width: "${(144*sx)|round|int}", height: "${(20*sy)|round|int}", long_mode: DOT, text_font: f16m, text_color: 0xE1E1E8}
         # Where the audio comes from: the AirPlay sender's device name or "Sendspin" (the component does not report the server name); empty for a station.
-        - label: {id: lbl_now_source, text: "", x: 8, y: 3, width: 120, height: 15, long_mode: DOT, text_font: f12m, text_color: 0xC4C4CC, hidden: true}
+        - label: {id: lbl_now_source, text: "", x: "${(8*sx)|round|int + corner_inset}", y: "${(3*sy)|round|int}", width: "${(120*sx)|round|int - corner_inset}", height: "${(15*sy)|round|int}", long_mode: DOT, text_font: f12m, text_color: 0xC4C4CC, hidden: true}
         - obj:
             id: now_prog
             styles: plain
-            x: 8
-            y: 106
-            width: 144
-            height: 20
+            x: "${(8*sx)|round|int + corner_inset}"
+            y: "${(106*sy)|round|int}"
+            width: "${row_width}"
+            height: "${(20*sy)|round|int}"
             scrollable: false
             hidden: true
             widgets:
-              - label: {id: lbl_prog_rem, text: "", x: 88, y: 2, width: 37, text_align: RIGHT, text_font: f13m, text_color: 0xE1E1E8}
+              - label: {id: lbl_prog_rem, text: "", x: "${(88*sx)|round|int}", y: "${(2*sy)|round|int}", width: "${(37*sx)|round|int}", text_align: RIGHT, text_font: f13m, text_color: 0xE1E1E8}
               # Playing bars at the right end; the 60 ms interval moves them while something plays.
-              - obj: {id: ind0, styles: plain, x: 131, y: 13, width: 3, height: 3, bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
-              - obj: {id: ind1, styles: plain, x: 136, y: 13, width: 3, height: 3, bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
-              - obj: {id: ind2, styles: plain, x: 141, y: 13, width: 3, height: 3, bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
+              - obj: {id: ind0, styles: plain, x: "${bars_x}", y: "${(13*sy)|round|int}", width: "${(3*sf)|round|int}", height: "${(3*sf)|round|int}", bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
+              - obj: {id: ind1, styles: plain, x: "${bars_x + (5*sx)|round|int}", y: "${(13*sy)|round|int}", width: "${(3*sf)|round|int}", height: "${(3*sf)|round|int}", bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
+              - obj: {id: ind2, styles: plain, x: "${bars_x + (10*sx)|round|int}", y: "${(13*sy)|round|int}", width: "${(3*sf)|round|int}", height: "${(3*sf)|round|int}", bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
               # Pause symbol in place of the playing bars, as tall as the highest bar.
               - obj:
                   id: pause_overlay
                   styles: plain
-                  x: 131
-                  y: 4
-                  width: 13
-                  height: 12
+                  x: "${bars_x}"
+                  y: "${(4*sy)|round|int}"
+                  width: "${(13*sx)|round|int}"
+                  height: "${(12*sy)|round|int}"
                   hidden: true
                   widgets:
-                    - obj: {styles: plain, x: 2, y: 0, width: 3, height: 12, bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
-                    - obj: {styles: plain, x: 8, y: 0, width: 3, height: 12, bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
+                    - obj: {styles: plain, x: "${(2*sx)|round|int}", y: 0, width: "${(3*sx)|round|int}", height: "${(12*sy)|round|int}", bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
+                    - obj: {styles: plain, x: "${(8*sx)|round|int}", y: 0, width: "${(3*sx)|round|int}", height: "${(12*sy)|round|int}", bg_color: 0xE1E1E8, bg_opa: COVER, radius: 0}
               - bar:
                   id: bar_prog
                   x: 0
-                  y: 8
-                  width: 100
-                  height: 4
+                  y: "${(8*sy)|round|int}"
+                  width: "${(100*sx)|round|int}"
+                  height: "${(4*sy)|round|int}"
                   min_value: 0
                   max_value: 1000
                   value: 0
@@ -2103,22 +2127,22 @@ lvgl:
         - obj:
             id: now_vol
             styles: plain
-            x: 8
-            y: 106
-            width: 144
-            height: 20
+            x: "${(8*sx)|round|int + corner_inset}"
+            y: "${(106*sy)|round|int}"
+            width: "${row_width}"
+            height: "${(20*sy)|round|int}"
             scrollable: false
             hidden: true
             widgets:
               # Speaker (crossed out when muted), the volume as bar and as number.
-              - label: {id: lbl_vol_icon, text: "󰕾", x: 0, y: 1, text_font: mdi18, text_color: 0xE1E1E8}
-              - label: {id: lbl_vol_pct, text: "", x: 116, y: 2, width: 28, text_align: RIGHT, text_font: f13m, text_color: 0xE1E1E8}
+              - label: {id: lbl_vol_icon, text: "󰕾", x: 0, y: "${(1*sy)|round|int}", text_font: mdi18, text_color: 0xE1E1E8}
+              - label: {id: lbl_vol_pct, text: "", x: "${row_width - (28*sx)|round|int}", y: "${(2*sy)|round|int}", width: "${(28*sx)|round|int}", text_align: RIGHT, text_font: f13m, text_color: 0xE1E1E8}
               - bar:
                   id: bar_vol
-                  x: 24
-                  y: 8
-                  width: 86
-                  height: 4
+                  x: "${(24*sx)|round|int}"
+                  y: "${(8*sy)|round|int}"
+                  width: "${row_width - (24*sx)|round|int - (34*sx)|round|int}"
+                  height: "${(4*sy)|round|int}"
                   min_value: 0
                   max_value: 100
                   value: 50
@@ -2135,24 +2159,24 @@ lvgl:
       # The side tiles start partly outside the screen in menu_settle; that must not make the page scroll.
       scrollable: false
       widgets:
-        - label: {text: "Radio", x: 8, y: 4, text_font: f13m, text_color: 0xFFFFFF}
-        - label: {id: hdr_time_main, text: "", x: 112, y: 5, width: 40, text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {text: "Radio", x: "${(8*sx)|round|int + corner_inset}", y: "${(4*sy)|round|int}", text_font: f13m, text_color: 0xFFFFFF}
+        - label: {id: hdr_time_main, text: "", x: "${(112*sx)|round|int - corner_inset}", y: "${(5*sy)|round|int}", width: "${(40*sx)|round|int}", text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
         - obj:
             id: c_root
             styles: plain
-            x: 46
-            y: 20
-            width: 68
-            height: 68
+            x: "${(screen_width - tile_center) // 2}"
+            y: "${(20*sy)|round|int}"
+            width: "${tile_center}"
+            height: "${tile_center}"
             widgets:
               - obj:
                   id: c_logo
                   styles: logo_box
                   x: 0
                   y: 0
-                  width: 68
-                  height: 68
-                  radius: 14
+                  width: "${tile_center}"
+                  height: "${tile_center}"
+                  radius: "${(14*sf)|round|int}"
                   scrollable: false
                   hidden: true
                   widgets:
@@ -2163,18 +2187,18 @@ lvgl:
             id: l_root
             styles: plain
             x: 0
-            y: 34
-            width: 40
-            height: 40
+            y: "${(20*sy)|round|int + (tile_center - tile_side) // 2}"
+            width: "${tile_side}"
+            height: "${tile_side}"
             widgets:
               - obj:
                   id: l_logo
                   styles: logo_box
                   x: 0
                   y: 0
-                  width: 40
-                  height: 40
-                  radius: 8
+                  width: "${tile_side}"
+                  height: "${tile_side}"
+                  radius: "${(8*sf)|round|int}"
                   scrollable: false
                   hidden: true
                   widgets:
@@ -2184,65 +2208,65 @@ lvgl:
         - obj:
             id: r_root
             styles: plain
-            x: 120
-            y: 34
-            width: 40
-            height: 40
+            x: "${screen_width - tile_side}"
+            y: "${(20*sy)|round|int + (tile_center - tile_side) // 2}"
+            width: "${tile_side}"
+            height: "${tile_side}"
             widgets:
               - obj:
                   id: r_logo
                   styles: logo_box
                   x: 0
                   y: 0
-                  width: 40
-                  height: 40
-                  radius: 8
+                  width: "${tile_side}"
+                  height: "${tile_side}"
+                  radius: "${(8*sf)|round|int}"
                   scrollable: false
                   hidden: true
                   widgets:
                     - image: {id: r_img, src: sendspin_cover_art, x: 0, y: 0, hidden: true}
                     - label: {id: r_ini, text: "", align: CENTER, text_font: f10m, text_color: 0xC4C4CC}
               - label: {id: r_icon, text: "", align: CENTER, text_font: ti24, text_color: 0xFFFFFF, hidden: true}
-        - label: {id: c_name, text: "", height: 16, x: 6, y: 97, width: 148, long_mode: SCROLL_CIRCULAR, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
-        - label: {id: c_sub, text: "", height: 15, x: 6, y: 112, width: 148, long_mode: DOT, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: c_name, text: "", height: "${(16*sy)|round|int}", x: "${(6*sx)|round|int}", y: "${(97*sy)|round|int}", width: "${(148*sx)|round|int}", long_mode: SCROLL_CIRCULAR, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
+        - label: {id: c_sub, text: "", height: "${(15*sy)|round|int}", x: "${(6*sx)|round|int}", y: "${(112*sy)|round|int}", width: "${(148*sx)|round|int}", long_mode: DOT, text_align: CENTER, text_font: f12m, text_color: 0xC4C4CC}
 
     # 2 with menu 1: Settings as a list, see render_settings.
     - id: settings_page
       styles: page_style
       scrollable: false
       widgets:
-        - label: {text: "Einstellungen", x: 8, y: 4, text_font: f13m, text_color: 0xFFFFFF}
-        - label: {id: hdr_time_set, text: "", x: 112, y: 5, width: 40, text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {text: "Einstellungen", x: "${(8*sx)|round|int + corner_inset}", y: "${(4*sy)|round|int}", text_font: f13m, text_color: 0xFFFFFF}
+        - label: {id: hdr_time_set, text: "", x: "${(112*sx)|round|int - corner_inset}", y: "${(5*sy)|round|int}", width: "${(40*sx)|round|int}", text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
         # Everything below the header in one box, so the page can settle in (radio_ui::settle_in).
         - obj:
             id: set_body
             styles: plain
             x: 0
             y: 0
-            width: 160
-            height: 128
+            width: "${(160*sx)|round|int}"
+            height: "${(128*sy)|round|int}"
             scrollable: false
             widgets:
-              - label: {text: "", x: 12, y: 28, text_font: ti16, text_color: 0xFFFFFF}
-              - label: {text: "Zurück", x: 34, y: 28, text_font: f13m, text_color: 0xFFFFFF}
-              - label: {text: "", x: 12, y: 52, text_font: ti16, text_color: 0xFFFFFF}
-              - label: {text: "Equalizer", x: 34, y: 52, text_font: f13m, text_color: 0xFFFFFF}
-              - label: {text: "", x: 136, y: 52, text_font: ti16, text_color: 0x787880}
-              - label: {text: "", x: 12, y: 76, text_font: ti16, text_color: 0xFFFFFF}
-              - label: {text: "Abdunkeln", x: 34, y: 76, text_font: f13m, text_color: 0xFFFFFF}
-              - label: {id: set_val2, text: "", x: 92, y: 76, width: 56, text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
-              - label: {text: "", x: 12, y: 100, text_font: ti16, text_color: 0xFFFFFF}
-              - label: {text: "Info", x: 34, y: 100, text_font: f13m, text_color: 0xFFFFFF}
-              - label: {text: "", x: 136, y: 100, text_font: ti16, text_color: 0x787880}
+              - label: {text: "", x: "${(12*sx)|round|int}", y: "${(28*sy)|round|int}", text_font: ti16, text_color: 0xFFFFFF}
+              - label: {text: "Zurück", x: "${(34*sx)|round|int}", y: "${(28*sy)|round|int}", text_font: f13m, text_color: 0xFFFFFF}
+              - label: {text: "", x: "${(12*sx)|round|int}", y: "${(52*sy)|round|int}", text_font: ti16, text_color: 0xFFFFFF}
+              - label: {text: "Equalizer", x: "${(34*sx)|round|int}", y: "${(52*sy)|round|int}", text_font: f13m, text_color: 0xFFFFFF}
+              - label: {text: "", x: "${(136*sx)|round|int}", y: "${(52*sy)|round|int}", text_font: ti16, text_color: 0x787880}
+              - label: {text: "", x: "${(12*sx)|round|int}", y: "${(76*sy)|round|int}", text_font: ti16, text_color: 0xFFFFFF}
+              - label: {text: "Abdunkeln", x: "${(34*sx)|round|int}", y: "${(76*sy)|round|int}", text_font: f13m, text_color: 0xFFFFFF}
+              - label: {id: set_val2, text: "", x: "${(92*sx)|round|int}", y: "${(76*sy)|round|int}", width: "${(56*sx)|round|int}", text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
+              - label: {text: "", x: "${(12*sx)|round|int}", y: "${(100*sy)|round|int}", text_font: ti16, text_color: 0xFFFFFF}
+              - label: {text: "Info", x: "${(34*sx)|round|int}", y: "${(100*sy)|round|int}", text_font: f13m, text_color: 0xFFFFFF}
+              - label: {text: "", x: "${(136*sx)|round|int}", y: "${(100*sy)|round|int}", text_font: ti16, text_color: 0x787880}
               # The pill lies above the rows and holds a dark copy of them in set_ink, shifted against
               # the pill so the copy lines up with the rows. The rows themselves are never recoloured.
               - obj:
                   id: set_pill
-                  x: 4
-                  y: 48
-                  width: 152
-                  height: 24
-                  radius: 12
+                  x: "${(4*sx)|round|int}"
+                  y: "${(48*sy)|round|int}"
+                  width: "${(152*sx)|round|int}"
+                  height: "${(24*sy)|round|int}"
+                  radius: "${(12*sf)|round|int}"
                   bg_color: 0xFFFFFF
                   bg_opa: COVER
                   border_width: 0
@@ -2252,96 +2276,96 @@ lvgl:
                     - obj:
                         id: set_ink
                         styles: plain
-                        x: -4
-                        y: -48
-                        width: 160
-                        height: 128
+                        x: "${(-4*sx)|round|int}"
+                        y: "${(-48*sy)|round|int}"
+                        width: "${(160*sx)|round|int}"
+                        height: "${(128*sy)|round|int}"
                         scrollable: false
                         widgets:
-                          - label: {text: "", x: 12, y: 28, text_font: ti16, text_color: 0x060608}
-                          - label: {text: "Zurück", x: 34, y: 28, text_font: f13m, text_color: 0x060608}
-                          - label: {text: "", x: 12, y: 52, text_font: ti16, text_color: 0x060608}
-                          - label: {text: "Equalizer", x: 34, y: 52, text_font: f13m, text_color: 0x060608}
-                          - label: {text: "", x: 136, y: 52, text_font: ti16, text_color: 0x46464E}
-                          - label: {text: "", x: 12, y: 76, text_font: ti16, text_color: 0x060608}
-                          - label: {text: "Abdunkeln", x: 34, y: 76, text_font: f13m, text_color: 0x060608}
-                          - label: {id: set_val2_ink, text: "", x: 92, y: 76, width: 56, text_align: RIGHT, text_font: f12m, text_color: 0x060608}
-                          - label: {text: "", x: 12, y: 100, text_font: ti16, text_color: 0x060608}
-                          - label: {text: "Info", x: 34, y: 100, text_font: f13m, text_color: 0x060608}
-                          - label: {text: "", x: 136, y: 100, text_font: ti16, text_color: 0x46464E}
+                          - label: {text: "", x: "${(12*sx)|round|int}", y: "${(28*sy)|round|int}", text_font: ti16, text_color: 0x060608}
+                          - label: {text: "Zurück", x: "${(34*sx)|round|int}", y: "${(28*sy)|round|int}", text_font: f13m, text_color: 0x060608}
+                          - label: {text: "", x: "${(12*sx)|round|int}", y: "${(52*sy)|round|int}", text_font: ti16, text_color: 0x060608}
+                          - label: {text: "Equalizer", x: "${(34*sx)|round|int}", y: "${(52*sy)|round|int}", text_font: f13m, text_color: 0x060608}
+                          - label: {text: "", x: "${(136*sx)|round|int}", y: "${(52*sy)|round|int}", text_font: ti16, text_color: 0x46464E}
+                          - label: {text: "", x: "${(12*sx)|round|int}", y: "${(76*sy)|round|int}", text_font: ti16, text_color: 0x060608}
+                          - label: {text: "Abdunkeln", x: "${(34*sx)|round|int}", y: "${(76*sy)|round|int}", text_font: f13m, text_color: 0x060608}
+                          - label: {id: set_val2_ink, text: "", x: "${(92*sx)|round|int}", y: "${(76*sy)|round|int}", width: "${(56*sx)|round|int}", text_align: RIGHT, text_font: f12m, text_color: 0x060608}
+                          - label: {text: "", x: "${(12*sx)|round|int}", y: "${(100*sy)|round|int}", text_font: ti16, text_color: 0x060608}
+                          - label: {text: "Info", x: "${(34*sx)|round|int}", y: "${(100*sy)|round|int}", text_font: f13m, text_color: 0x060608}
+                          - label: {text: "", x: "${(136*sx)|round|int}", y: "${(100*sy)|round|int}", text_font: ti16, text_color: 0x46464E}
 
     # 3: Info, all values on one page. Click or hold returns to the menu.
     - id: info_page
       styles: page_style
       scrollable: false
       widgets:
-        - label: {text: "Info", x: 8, y: 4, text_font: f13m, text_color: 0xFFFFFF}
-        - label: {id: hdr_time_info, text: "", x: 112, y: 5, width: 40, text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
-        - label: {text: "WLAN", x: 8, y: 25, text_font: f12m, text_color: 0xC4C4CC}
-        - label: {id: lbl_info_ssid, text: "", height: 15, x: 60, y: 25, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
-        - label: {text: "Signal", x: 8, y: 42, text_font: f12m, text_color: 0xC4C4CC}
-        - label: {id: lbl_info_rssi, text: "", height: 15, x: 60, y: 42, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
-        - label: {text: "IP", x: 8, y: 59, text_font: f12m, text_color: 0xC4C4CC}
-        - label: {id: lbl_info_ip, text: "", height: 15, x: 60, y: 59, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
-        - label: {text: "HA", x: 8, y: 76, text_font: f12m, text_color: 0xC4C4CC}
-        - label: {id: lbl_info_ha, text: "", height: 15, x: 60, y: 76, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
-        - label: {text: "Firmware", x: 8, y: 93, text_font: f12m, text_color: 0xC4C4CC}
-        - label: {id: lbl_info_version, text: "", height: 15, x: 60, y: 93, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
-        - label: {text: "Sender", x: 8, y: 110, text_font: f12m, text_color: 0xC4C4CC}
-        - label: {id: lbl_info_count, text: "", height: 15, x: 60, y: 110, width: 92, long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "Info", x: "${(8*sx)|round|int + corner_inset}", y: "${(4*sy)|round|int}", text_font: f13m, text_color: 0xFFFFFF}
+        - label: {id: hdr_time_info, text: "", x: "${(112*sx)|round|int - corner_inset}", y: "${(5*sy)|round|int}", width: "${(40*sx)|round|int}", text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {text: "WLAN", x: "${(8*sx)|round|int}", y: "${(25*sy)|round|int}", text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_ssid, text: "", height: "${(15*sy)|round|int}", x: "${(60*sx)|round|int}", y: "${(25*sy)|round|int}", width: "${(92*sx)|round|int}", long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "Signal", x: "${(8*sx)|round|int}", y: "${(42*sy)|round|int}", text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_rssi, text: "", height: "${(15*sy)|round|int}", x: "${(60*sx)|round|int}", y: "${(42*sy)|round|int}", width: "${(92*sx)|round|int}", long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "IP", x: "${(8*sx)|round|int}", y: "${(59*sy)|round|int}", text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_ip, text: "", height: "${(15*sy)|round|int}", x: "${(60*sx)|round|int}", y: "${(59*sy)|round|int}", width: "${(92*sx)|round|int}", long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "HA", x: "${(8*sx)|round|int}", y: "${(76*sy)|round|int}", text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_ha, text: "", height: "${(15*sy)|round|int}", x: "${(60*sx)|round|int}", y: "${(76*sy)|round|int}", width: "${(92*sx)|round|int}", long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "Firmware", x: "${(8*sx)|round|int}", y: "${(93*sy)|round|int}", text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_version, text: "", height: "${(15*sy)|round|int}", x: "${(60*sx)|round|int}", y: "${(93*sy)|round|int}", width: "${(92*sx)|round|int}", long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
+        - label: {text: "Sender", x: "${(8*sx)|round|int}", y: "${(110*sy)|round|int}", text_font: f12m, text_color: 0xC4C4CC}
+        - label: {id: lbl_info_count, text: "", height: "${(15*sy)|round|int}", x: "${(60*sx)|round|int}", y: "${(110*sy)|round|int}", width: "${(92*sx)|round|int}", long_mode: DOT, text_align: RIGHT, text_font: f12m, text_color: 0xFFFFFF}
 
     # 4: Equalizer: bass, mid and treble, see render_eq.
     - id: eq_page
       styles: page_style
       scrollable: false
       widgets:
-        - label: {text: "Equalizer", x: 8, y: 4, text_font: f13m, text_color: 0xFFFFFF}
-        - label: {id: hdr_time_eq, text: "", x: 112, y: 5, width: 40, text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
+        - label: {text: "Equalizer", x: "${(8*sx)|round|int + corner_inset}", y: "${(4*sy)|round|int}", text_font: f13m, text_color: 0xFFFFFF}
+        - label: {id: hdr_time_eq, text: "", x: "${(112*sx)|round|int - corner_inset}", y: "${(5*sy)|round|int}", width: "${(40*sx)|round|int}", text_align: RIGHT, text_font: f12m, text_color: 0xC4C4CC}
         # Everything below the header in one box, so the page can settle in (radio_ui::settle_in).
         - obj:
             id: eq_body
             styles: plain
             x: 0
             y: 0
-            width: 160
-            height: 128
+            width: "${(160*sx)|round|int}"
+            height: "${(128*sy)|round|int}"
             scrollable: false
             widgets:
-              - obj: {x: 31, y: 24, width: 3, height: 61, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
-              - obj: {x: 79, y: 24, width: 3, height: 61, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
-              - obj: {x: 75, y: 44, width: 11, height: 1, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
-              - obj: {x: 127, y: 24, width: 3, height: 61, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
-              - obj: {x: 123, y: 44, width: 11, height: 1, radius: 1, bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
-              - obj: {id: eq_pill, x: 10, y: 89, width: 44, height: 17, radius: 8, bg_color: 0xFFFFFF, bg_opa: COVER, border_width: 0, pad_all: 0}
-              - obj: {id: eq_fill0, x: 31, y: 84, width: 3, height: 1, radius: 1, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
-              - obj: {id: eq_knob0, x: 28, y: 80, width: 9, height: 9, radius: 5, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
-              - label: {id: eq_lbl0, text: "Bass", x: 10, y: 91, width: 44, text_align: CENTER, text_font: f11m, text_color: 0x787880}
-              - obj: {id: eq_fill1, x: 79, y: 84, width: 3, height: 1, radius: 1, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
-              - obj: {id: eq_knob1, x: 76, y: 80, width: 9, height: 9, radius: 5, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
-              - label: {id: eq_lbl1, text: "Mitten", x: 58, y: 91, width: 44, text_align: CENTER, text_font: f11m, text_color: 0x787880}
-              - obj: {id: eq_fill2, x: 127, y: 84, width: 3, height: 1, radius: 1, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
-              - obj: {id: eq_knob2, x: 124, y: 80, width: 9, height: 9, radius: 5, bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
-              - label: {id: eq_lbl2, text: "Höhen", x: 106, y: 91, width: 44, text_align: CENTER, text_font: f11m, text_color: 0x787880}
-              - label: {id: eq_value, text: "", x: 0, y: 109, width: 160, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
+              - obj: {x: "${(31*sx)|round|int}", y: "${(24*sy)|round|int}", width: "${(3*sx)|round|int}", height: "${(61*sy)|round|int}", radius: "${(1*sf)|round|int}", bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+              - obj: {x: "${(79*sx)|round|int}", y: "${(24*sy)|round|int}", width: "${(3*sx)|round|int}", height: "${(61*sy)|round|int}", radius: "${(1*sf)|round|int}", bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+              - obj: {x: "${(75*sx)|round|int}", y: "${(44*sy)|round|int}", width: "${(11*sx)|round|int}", height: "${(1*sy)|round|int}", radius: "${(1*sf)|round|int}", bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+              - obj: {x: "${(127*sx)|round|int}", y: "${(24*sy)|round|int}", width: "${(3*sx)|round|int}", height: "${(61*sy)|round|int}", radius: "${(1*sf)|round|int}", bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+              - obj: {x: "${(123*sx)|round|int}", y: "${(44*sy)|round|int}", width: "${(11*sx)|round|int}", height: "${(1*sy)|round|int}", radius: "${(1*sf)|round|int}", bg_color: 0x46464E, bg_opa: COVER, border_width: 0, pad_all: 0}
+              - obj: {id: eq_pill, x: "${(10*sx)|round|int}", y: "${(89*sy)|round|int}", width: "${(44*sx)|round|int}", height: "${(17*sy)|round|int}", radius: "${(8*sf)|round|int}", bg_color: 0xFFFFFF, bg_opa: COVER, border_width: 0, pad_all: 0}
+              - obj: {id: eq_fill0, x: "${(31*sx)|round|int}", y: "${(84*sy)|round|int}", width: "${(3*sx)|round|int}", height: "${(1*sy)|round|int}", radius: "${(1*sf)|round|int}", bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+              - obj: {id: eq_knob0, x: "${(28*sx)|round|int}", y: "${(80*sy)|round|int}", width: "${(9*sf)|round|int}", height: "${(9*sf)|round|int}", radius: "${(5*sf)|round|int}", bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+              - label: {id: eq_lbl0, text: "Bass", x: "${(10*sx)|round|int}", y: "${(91*sy)|round|int}", width: "${(44*sx)|round|int}", text_align: CENTER, text_font: f11m, text_color: 0x787880}
+              - obj: {id: eq_fill1, x: "${(79*sx)|round|int}", y: "${(84*sy)|round|int}", width: "${(3*sx)|round|int}", height: "${(1*sy)|round|int}", radius: "${(1*sf)|round|int}", bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+              - obj: {id: eq_knob1, x: "${(76*sx)|round|int}", y: "${(80*sy)|round|int}", width: "${(9*sf)|round|int}", height: "${(9*sf)|round|int}", radius: "${(5*sf)|round|int}", bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+              - label: {id: eq_lbl1, text: "Mitten", x: "${(58*sx)|round|int}", y: "${(91*sy)|round|int}", width: "${(44*sx)|round|int}", text_align: CENTER, text_font: f11m, text_color: 0x787880}
+              - obj: {id: eq_fill2, x: "${(127*sx)|round|int}", y: "${(84*sy)|round|int}", width: "${(3*sx)|round|int}", height: "${(1*sy)|round|int}", radius: "${(1*sf)|round|int}", bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+              - obj: {id: eq_knob2, x: "${(124*sx)|round|int}", y: "${(80*sy)|round|int}", width: "${(9*sf)|round|int}", height: "${(9*sf)|round|int}", radius: "${(5*sf)|round|int}", bg_color: 0x787880, bg_opa: COVER, border_width: 0, pad_all: 0}
+              - label: {id: eq_lbl2, text: "Höhen", x: "${(106*sx)|round|int}", y: "${(91*sy)|round|int}", width: "${(44*sx)|round|int}", text_align: CENTER, text_font: f11m, text_color: 0x787880}
+              - label: {id: eq_value, text: "", x: 0, y: "${(109*sy)|round|int}", width: "${(160*sx)|round|int}", text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
 
     - id: ota_page
       styles: page_style
       scrollable: false
       widgets:
-        - label: {id: lbl_ota_title, text: "Update", x: 0, y: 40, width: 160, text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
+        - label: {id: lbl_ota_title, text: "Update", x: 0, y: "${(40*sy)|round|int}", width: "${(160*sx)|round|int}", text_align: CENTER, text_font: f13m, text_color: 0xFFFFFF}
         - bar:
             id: bar_ota
-            x: 20
-            y: 62
-            width: 120
-            height: 4
+            x: "${(20*sx)|round|int}"
+            y: "${(62*sy)|round|int}"
+            width: "${(120*sx)|round|int}"
+            height: "${(4*sy)|round|int}"
             min_value: 0
             max_value: 100
             value: 0
-            radius: 2
+            radius: "${(2*sf)|round|int}"
             bg_color: 0x46464E
             bg_opa: COVER
             indicator:
               bg_color: 0xFFFFFF
-              radius: 2
-        - label: {id: lbl_ota_pct, text: "0 %", x: 0, y: 72, width: 160, text_align: CENTER, text_font: f12m, text_color: 0xFFFFFF}
+              radius: "${(2*sf)|round|int}"
+        - label: {id: lbl_ota_pct, text: "0 %", x: 0, y: "${(72*sy)|round|int}", width: "${(160*sx)|round|int}", text_align: CENTER, text_font: f12m, text_color: 0xFFFFFF}
