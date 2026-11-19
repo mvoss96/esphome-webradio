@@ -28,7 +28,7 @@ substitutions:
 esphome:
   project:
     name: mvoss.web-radio
-    version: "1.20.0"
+    version: "1.20.1"
   on_boot:
     priority: -100
     then:

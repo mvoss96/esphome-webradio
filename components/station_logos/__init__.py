@@ -25,4 +25,4 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     cg.add_define("STATION_LOGOS_SIZE", config[CONF_SIZE])
-    cg.add_library("pngle", "1.1.0")
+    cg.add_library("kikuchan98/pngle", "1.1.0")
